@@ -33,6 +33,7 @@ Arguments:
                            /                  the disk the system runs from
                            /mnt/Hummingbird   a drive mounted at /mnt/Hummingbird
                          (dirp is short for directory path.)
+  <dirp_source>          the path of an existing home directory to bring in
   <name>                 a storage account's name, such as Thomas·Work; the
                          part before the last '·' names its parent
   <database uid>         a storage account's uid in the storage database
@@ -53,11 +54,19 @@ Keywords, such as make-system-account, are words given after a command's
 other arguments, in any order, as the command itself is a word.
 
 Commands:
-  account make <dirp_storage> <name> [uid <database uid>] [parent <name>] [make-system-account]
+  account make <dirp_storage> <name> [uid <database uid>] [parent <name>] [from <dirp_source>]
+               [make-system-account]
                                  make a storage account, with its home in account-data;
                                  its database uid is the next counting down from
                                  1999999999, or uid keeps an existing uid. Its parent is
                                  the account its name begins with, before the last '·'.
+                                 from brings in an existing home, such as one made
+                                 before Account-Tree, in place of an empty one: every
+                                 file is given to the database uid, and the directory
+                                 is moved into account-data. Every file must have the
+                                 directory's own owner and group and no ACL; when any
+                                 does not, those are listed and nothing is changed, so
+                                 preview account make ... from ... is a check.
                                  make-system-account also makes a system account of the
                                  same name on this system, with a new system uid, and
                                  records in the system map that the two are the same
@@ -156,7 +165,9 @@ undo: storage delete, then system delete.
 For a removable storage, once: enroll the key with systemd-cryptenroll
 --fido2-device=auto --fido2-with-client-pin=no <partition>, then system configure,
 then storage register while it is mounted. From then on plugging the drive in, and
-touching the key, plugs it; pulling the key out unplugs it.
+touching the key, plugs it; pulling the key out unplugs it. A key that leaves the
+bus is taken as pulled, so an OnlyKey needs its Inactivity Lockout Timer set to 0,
+which keeps it from locking itself, and leaving the bus, after a time without use.
 """
 
 import sys ,os
@@ -293,10 +304,11 @@ def CLI(argv=None):
       header(command ,dirp__storage ,preview)
       Storage.storage__delete(dirp__storage ,"delete-account-data" in keyword ,"forget-other-systems" in keyword ,log ,preview)
     elif command == "account make" and len(rest) >= 2:
-      (dirp__storage ,name) ,keyword = split_keyword(rest ,2 ,("make-system-account",) ,("uid" ,"parent"))
+      (dirp__storage ,name) ,keyword = split_keyword(rest ,2 ,("make-system-account",) ,("uid" ,"parent" ,"from"))
       database_uid = integer(keyword["uid"] ,"uid") if "uid" in keyword else None
       header(command ,dirp__storage ,preview)
-      Storage.account__make(dirp__storage ,name ,database_uid ,keyword.get("parent") ,"make-system-account" in keyword ,log ,preview)
+      Storage.account__make(dirp__storage ,name ,database_uid ,keyword.get("parent") ,"make-system-account" in keyword ,log ,preview,
+                            keyword.get("from"))
     elif command == "is-same-account" and rest:
       specifier ,keyword = split_keyword(rest ,6 ,("make-system-account",))
       system_spec ,storage_spec = system_and_storage(list__account_specifier(specifier))

@@ -15,7 +15,7 @@ recorded in the system map of the system database, and attach mounts exactly
 the accounts it lists.
 """
 
-import os ,shutil
+import os ,stat ,shutil ,subprocess
 from uuid import uuid4
 from pathlib import Path
 
@@ -191,13 +191,157 @@ def storage__delete(dirp__storage ,delete_account_data ,forget_other_systems ,lo
 # --------------------------------------------------------------------------------
 # account make
 
-def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account ,log ,preview):
+# --------------------------------------------------------------------------------
+# a home brought in from outside Account-Tree
+
+# extended attributes that hold an ACL, whose entries name uids and gids
+LIST__ACL_XATTR = ("system.posix_acl_access" ,"system.posix_acl_default")
+# how many offending files a refused import lists; the rest are counted
+COUNT_OF__OFFENDER_LISTED = 40
+
+def home__offender(dirpa__source ,set__uid ,set__gid):
+  """
+  Walk the directory tree at dirpa__source and return, for each file that
+  keeps it from being imported as one account's home, its path and why: an
+  owner not in set__uid, a group not in set__gid, an ACL, or a file system
+  mounted below. Each home is mounted with one uid and one gid mapped, its
+  account's, so a file of any other id would show as nobody on a system
+  whose ids differ from this one's.
+  """
+  list__offender = []
+  dev = os.lstat(dirpa__source).st_dev
+  def check(path ,st):
+    if st.st_dev != dev:
+      list__offender.append((path ,"a file system mounted below; unmount it")); return False
+    if st.st_uid not in set__uid:
+      list__offender.append((path ,f"owned by uid {st.st_uid}"))
+    if st.st_gid not in set__gid:
+      list__offender.append((path ,f"group gid {st.st_gid}"))
+    if not stat.S_ISLNK(st.st_mode):
+      try:
+        name_list = os.listxattr(path ,follow_symlinks=False)
+      except OSError:
+        name_list = []
+      if any(n in LIST__ACL_XATTR for n in name_list):
+        list__offender.append((path ,"an ACL"))
+    return True
+  def walk(dirpa):
+    try:
+      entry_list = list(os.scandir(dirpa))
+    except OSError as error:
+      list__offender.append((dirpa ,f"cannot be read: {error.strerror}")); return
+    for e in entry_list:
+      try:
+        st = e.stat(follow_symlinks=False)
+      except OSError as error:
+        list__offender.append((e.path ,f"cannot be read: {error.strerror}")); continue
+      if check(e.path ,st) and stat.S_ISDIR(st.st_mode):
+        walk(e.path)
+  check(str(dirpa__source) ,os.lstat(dirpa__source))
+  walk(str(dirpa__source))
+  return list__offender
+
+def home__owner_set(dirpa__source ,database_uid ,log):
+  """
+  Give every file at dirpa__source to database uid, owner and group, keeping
+  each file's mode: the kernel clears the setuid and setgid bits of a file
+  whose owner changes, and they are put back. Returns the count of files changed.
+  """
+  count = 0
+  def give(path ,st):
+    nonlocal count
+    if st.st_uid == database_uid and st.st_gid == database_uid: return
+    os.chown(path ,database_uid ,database_uid ,follow_symlinks=False)
+    if not stat.S_ISLNK(st.st_mode) and os.lstat(path).st_mode != st.st_mode:
+      os.chmod(path ,stat.S_IMODE(st.st_mode))
+    count += 1
+  def walk(dirpa):
+    for e in os.scandir(dirpa):
+      st = e.stat(follow_symlinks=False)
+      give(e.path ,st)
+      if stat.S_ISDIR(st.st_mode):
+        walk(e.path)
+  give(str(dirpa__source) ,os.lstat(dirpa__source))
+  walk(str(dirpa__source))
+  return count
+
+def home__import(dirp__source ,dirpa__home ,database_uid ,log ,preview):
+  """
+  Bring the directory tree at dirp__source in as the home at dirpa__home, the
+  storage account with database_uid not yet recorded. Every file must belong
+  to the directory's own owner and group, or already to database_uid; when
+  any does not, the offenders are listed and nothing is changed. Otherwise
+  every file is given to database_uid, and the tree is moved: renamed when it
+  is on the storage's file system, moved by mv otherwise, which copies it and
+  then deletes the source. Returns True when the home is in place, or would be.
+
+  A run stopped part way can be run again: files already given to the
+  database uid pass the check, and a source already at dirpa__home is not
+  moved. The database uid is the next one down, the same again as long as no
+  other storage account is made in between.
+  """
+  dirpa__source = Path(os.path.abspath(dirp__source))
+  if dirpa__source.is_symlink() or not dirpa__source.is_dir():
+    log.error(str(dirpa__source) ,"not a directory"); return False
+  if Kernel.is__mount_point(dirpa__source):
+    log.error(str(dirpa__source) ,"is a mount point; give the directory mounted there, on its own storage"); return False
+  in_place = dirpa__source == dirpa__home
+  if not in_place and (dirpa__home.exists() or dirpa__home.is_symlink()):
+    log.error(str(dirpa__home) ,"exists already"); return False
+  if dirpa__home.parent in [dirpa__source] + list(dirpa__source.parents) and not in_place:
+    log.error(str(dirpa__source) ,"holds account-data itself"); return False
+  st = os.lstat(dirpa__source)
+  if st.st_uid == 0:
+    log.error(str(dirpa__source) ,"is owned by root; give the home of the account, owned by it"); return False
+  set__uid = {st.st_uid ,database_uid}
+  set__gid = {st.st_gid ,database_uid}
+  list__offender = home__offender(dirpa__source ,set__uid ,set__gid)
+  if list__offender:
+    for path ,why in list__offender[:COUNT_OF__OFFENDER_LISTED]:
+      log.error(path ,why)
+    more = len(list__offender) - COUNT_OF__OFFENDER_LISTED
+    if more > 0:
+      log.error(f"{more} more" ,"files offend in the same ways")
+    log.line("kept" ,str(dirpa__source) ,f"not imported: every file must be owned by uid {st.st_uid} with group"
+             f" gid {st.st_gid}, and carry no ACL; fix those listed and run it again")
+    return False
+  log.line("checked" ,str(dirpa__source) ,f"every file is owned by uid {st.st_uid}, group gid {st.st_gid}, with no ACL")
+  if preview:
+    log.line("changed owner" ,str(dirpa__source) ,f"every file to database uid {database_uid}, owner and group")
+    if not in_place:
+      log.line("moved" ,str(dirpa__source) ,f"to {dirpa__home}")
+    return True
+  try:
+    count = home__owner_set(dirpa__source ,database_uid ,log)
+  except OSError as error:
+    log.error(str(error.filename or dirpa__source) ,f"owner not changed: {error.strerror}; nothing is recorded,"
+              " and running it again carries on"); return False
+  log.line("changed owner" ,str(dirpa__source) ,f"{count} file" + ("" if count == 1 else "s") + f" to database uid {database_uid}")
+  if not in_place:
+    if os.lstat(dirpa__home.parent).st_dev == st.st_dev:
+      os.rename(dirpa__source ,dirpa__home)
+      log.line("moved" ,str(dirpa__source) ,f"to {dirpa__home}, renamed on the same file system")
+    else:
+      # mv copies, keeping owners, modes, times and extended attributes, then deletes the source
+      result = subprocess.run(["mv" ,"-T" ,str(dirpa__source) ,str(dirpa__home)] ,capture_output=True ,text=True)
+      if result.returncode != 0:
+        log.error(str(dirpa__source) ,f"mv failed: {result.stderr.strip()}; the source is kept where mv had not"
+                  f" finished, and {dirpa__home} holds what was copied"); return False
+      log.line("moved" ,str(dirpa__source) ,f"to {dirpa__home}, copied by mv to another file system and the source deleted")
+  # the home keeps its mode: a group-readable home, such as one shared by group, stays so
+  return True
+
+def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account ,log ,preview ,dirp__source=None):
   """
   Make a storage account in the storage database of the storage whose root is
   dirp__storage, with its home in account-data. Its parent is the account whose name its own begins with,
   before the last '·', or the one given; an account with no '·' in its name
   is a child of root. With make_system_account, also make a system account of
   the same name and record that the two are the same account.
+
+  Given dirp__source, an existing home, it is brought in as the account's
+  home by home__import, in place of an empty one. The account is recorded only once
+  the home is in place.
   """
   problem = valid_name(name)
   if problem:
@@ -225,7 +369,9 @@ def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account
     log.error(name ,f"database uid {database_uid} has been given out before"); return
 
   dirp__home = Database.dirp__account_data(dirpa__Account_Tree(dirp__storage)) / name
-  if dirp__home.exists() and dirp__home.stat().st_uid != database_uid:
+  if dirp__source is not None:
+    if not home__import(dirp__source ,dirp__home ,database_uid ,log ,preview): return
+  elif dirp__home.exists() and dirp__home.stat().st_uid != database_uid:
     log.error(str(dirp__home) ,f"exists, owned by uid {dirp__home.stat().st_uid}, not database uid {database_uid}"); return
 
   stamp = Database.now()
@@ -234,7 +380,10 @@ def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account
     t.execute("INSERT INTO account(database_uid ,name ,parent__database_uid ,parent_name ,state ,created ,changed)"
       " VALUES (? ,? ,? ,? ,'active' ,? ,?)" ,(database_uid ,name ,parent__database_uid ,parent ,stamp ,stamp))
   log.line("made" ,f"storage account {name}" ,f"database uid {database_uid}" + (f", child of {parent}" if parent else ", child of root"))
-  if dirp__home.exists():
+  if dirp__source is not None:
+    mode = "its mode kept" if preview else f"mode {stat.S_IMODE(os.lstat(dirp__home).st_mode):04o}"
+    log.line("kept" ,str(dirp__home) ,f"imported home, owned by database uid {database_uid}, {mode}")
+  elif dirp__home.exists():
     log.line("kept" ,str(dirp__home) ,"existing home, owned by its database uid")
   else:
     if not act(log ,preview ,str(dirp__home) ,os.mkdir ,dirp__home ,0o700): return
@@ -343,8 +492,17 @@ def attach(dirp__storage ,branch ,log ,preview):
   # a removable storage plugged in again: make again the system accounts its
   # unplug deleted, before anything reads the rows in use
   set__promised = set()
+  dict__group_later = {}
   count_of__replugged = sum(1 for m in system_map__unplugged(system_db ,db)
-                            if SameAccount.same_account__replug(system_db ,m ,log ,preview ,set__promised))
+                            if SameAccount.same_account__replug(system_db ,m ,log ,preview ,set__promised ,dict__group_later))
+  # supplementary groups that are own groups of accounts made after it
+  for name ,list__group in dict__group_later.items():
+    list__now = [g for g in list__group if preview or SameAccount.sa.system_group(g) is not None]
+    list__gone = [g for g in list__group if g not in list__now]
+    if list__now and act(log ,preview ,name ,SameAccount.sa.system_account__group_add ,name ,list__now):
+      log.line("set" ,name ,"member again of " + ", ".join(list__now))
+    if list__gone:
+      log.line("warning" ,name ,"no longer in " + ", ".join(list__gone) + ", which this system no longer has")
 
   if branch:
     storage__branch(system_db ,db ,dirp__Account_Tree ,log ,preview)

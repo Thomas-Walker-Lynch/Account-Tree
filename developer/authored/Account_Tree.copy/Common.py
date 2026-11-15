@@ -43,7 +43,8 @@ class Log:
     "retired": "would retire" ,"mapped": "would map" ,"branched": "would branch",
     "unlocked": "would unlock" ,"locked": "would lock" ,"powered off": "would power off",
     "ended": "would end" ,"watching": "would watch" ,"written": "would write" ,"reloaded": "would reload",
-    "frozen": "would freeze" ,"thawed": "would thaw" ,"unplugged": "would unplug" ,"forgotten": "would forget",
+    "unplugged": "would unplug" ,"forgotten": "would forget",
+    "changed owner": "would change owner" ,"moved": "would move",
   }
 
   def __init__(self ,preview):

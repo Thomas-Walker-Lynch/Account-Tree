@@ -413,6 +413,21 @@ def local_file__delete(system_uid ,name ,log ,preview):
   if count:
     log.line("deleted" ,f"{count} file" + ("" if count == 1 else "s") ,f"that {name} left on this system")
 
+def own_group__delete_left(list__row ,log ,preview):
+  """
+  After unplug has deleted the system accounts of list__row: delete the own
+  group of each that was kept because another account of the storage was a
+  member then. Once those accounts are deleted too, it has no member left.
+  """
+  for row in list__row:
+    name = row["system_account__name"]
+    entry = sa.system_group(name)
+    if entry is None or entry.gr_gid != row["system_gid"] or sa.system_account(name) is not None: continue
+    if entry.gr_mem:
+      log.line("kept" ,f"system group {name}" ,"accounts not of this storage are members: " + ", ".join(entry.gr_mem)); continue
+    if not act(log ,preview ,name ,sa.system_group__delete ,name): continue
+    log.line("deleted system group" ,name ,f"gid {row['system_gid']}, once its members were deleted")
+
 def same_account__unplug(system_db ,row ,log ,preview):
   """
   For a row in use whose system account Account-Tree made: keep what the
@@ -439,12 +454,16 @@ def same_account__unplug(system_db ,row ,log ,preview):
   log.line("unplugged" ,name ,f"system uid {row['system_uid']} freed; made again when its storage is plugged in")
   return True
 
-def same_account__replug(system_db ,row ,log ,preview ,set__promised=None):
+def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict__group_later=None):
   """
   For an unplugged row: make its system account again, with the next free
   system uid and what was kept of it, and put the row back in use. Run by
   attach before it mounts the homes. In a preview the uid it would give is
   added to set__promised, so that the next is not said to get the same one.
+  A supplementary group that does not exist yet, such as the own group of
+  another account of the storage not made again yet, is put in
+  dict__group_later under the account's name, for the caller to add once
+  every account is made; without dict__group_later it is warned of.
   Returns False when it could not.
   """
   name = row["system_account__name"]
@@ -462,7 +481,9 @@ def same_account__replug(system_db ,row ,log ,preview ,set__promised=None):
   if setting:
     list__group = setting["list__supplementary_group"]
     list__missing = [g for g in list__group if sa.system_group(g) is None]
-    if list__missing:
+    if list__missing and dict__group_later is not None:
+      dict__group_later[name] = list__missing
+    elif list__missing:
       log.line("warning" ,name ,"no longer in " + ", ".join(list__missing) + ", which this system no longer has")
     setting = dict(setting ,list__supplementary_group=[g for g in list__group if g not in list__missing])
   if not act(log ,preview ,name ,sa.system_account__make ,name ,system_uid ,setting): return False

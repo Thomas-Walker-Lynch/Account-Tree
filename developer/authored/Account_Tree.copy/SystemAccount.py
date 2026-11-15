@@ -85,6 +85,10 @@ def system_account__setting(name):
           "aging": dict(zip(("last_change" ,"minimum" ,"maximum" ,"warning" ,"inactive" ,"expire") ,shadow[1:7])),
           "list__supplementary_group": list__supplementary_group(name)}
 
+def system_account__group_add(name ,list__group):
+  """Add the account to each group in list__group, keeping the groups it has."""
+  run_shadow(["usermod" ,"-a" ,"-G" ,",".join(list__group) ,name])
+
 def login_defs__value(key ,default):
   try:
     for line in Path("/etc/login.defs").read_text(encoding="utf-8").splitlines():
