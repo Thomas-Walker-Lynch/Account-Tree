@@ -32,6 +32,14 @@ Account-Tree_key@hidrawN.service, which is bound to the key's device unit:
 when the key is pulled out, systemd stops that service, and its ExecStop runs
 unplug_key.
 
+A key that has come onto the bus, as an OnlyKey does after its PIN is
+entered, takes a moment before it can take an offer, and drops one made
+sooner without lighting. So before an offer the key is asked for its FIDO2
+info with fido2-token, which needs no touch, until it answers. An offer is
+also given up when the key or the drive leaves the bus, and made again when
+it gets no answer in OFFER__ANSWER__SECOND, longer than a key's own touch
+window, which says the key never received it.
+
 Pulling the key out unplugs at once: a key that leaves the bus is taken to
 have been pulled. An OnlyKey locks itself after a time without use, and in
 locking leaves the bus and comes back; with Account-Tree its inactivity
@@ -77,6 +85,18 @@ MOUNT_OPTION = "nosuid,nodev"
 SESSION_WAIT__SECOND = 5
 TERM_WAIT__SECOND = 10
 KILL_WAIT__SECOND = 5
+# A key that receives an offer lights, and answers within its own touch
+# window, about 40 seconds on an OnlyKey, touched or not. An offer with no
+# answer after OFFER__ANSWER__SECOND never reached the key; it is made again,
+# up to COUNT_OF__OFFER times in all.
+OFFER__ANSWER__SECOND = 45
+COUNT_OF__OFFER = 2
+# A key that has come onto the bus takes a moment before it can take an offer;
+# one made sooner is dropped without the key lighting. Before an offer the key
+# is asked for its FIDO2 info, which needs no touch, until it answers or
+# READY__WAIT__SECOND passes. Each ask is given READY__ASK__SECOND.
+READY__WAIT__SECOND = 10
+READY__ASK__SECOND = 2
 
 NAME_CHARACTER = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
 
@@ -285,7 +305,7 @@ def list__system_map_row(system_db ,database_uuid):
                         (database_uuid,))
 
 def is__child_account(name):
-  return SEPARATOR in name
+  return SameAccount.is__child_account(name)
 
 
 # --------------------------------------------------------------------------------
@@ -407,6 +427,11 @@ def plug_all(log ,preview):
       device = Path("/dev/disk/by-uuid") / r["luks_uuid"]
       if not device.exists(): continue
       found = True
+      record = plugged__read(r["storage_name"])
+      if record and Path(f"/dev/mapper/{record['mapper']}").exists() and Kernel.is__mount_point(Path(record["dirpa__mount"])):
+        # a key's device can be announced again with no key arriving, as at a
+        # login; plugging again would record another attach
+        log.line("kept" ,f"storage {r['storage_name']}" ,"plugged in already"); continue
       plug_locked(str(device) ,False ,log ,preview)
     if not found:
       log.line("skipped" ,"plug all" ,"no registered storage is plugged in")
@@ -476,6 +501,77 @@ def plug_locked(device ,passphrase ,log ,preview):
   if key_used:
     key__watch(key_used ,name ,log ,preview)
 
+def key__ready(key):
+  """
+  Wait until the key answers a request for its FIDO2 info, which needs no
+  touch. Returns (is_ready ,why); for a key that answered only after being
+  asked more than once, why says how long it took. With no fido2-token, or a key that never
+  answers, the offer is made anyway, and its own wait for an answer covers it.
+  """
+  tool = program("fido2-token")
+  if tool is None:
+    return False ,"fido2-token is not installed, so its readiness was not asked"
+  start = time.monotonic()
+  deadline = start + READY__WAIT__SECOND
+  count_of__ask = 0
+  while True:
+    if not Path(key).exists():
+      return False ,f"the key at {key} left the bus"
+    status ,out ,err = run([tool ,"-I" ,key] ,timeout=READY__ASK__SECOND)
+    count_of__ask += 1
+    if status == 0:
+      if count_of__ask == 1: return True ,""
+      return True ,f"it answered fido2-token after {time.monotonic() - start:.1f} seconds"
+    why = last_line(err) or last_line(out) or f"status {status}"
+    if time.monotonic() > deadline:
+      return False ,f"it did not answer fido2-token within {READY__WAIT__SECOND} seconds ({why})"
+    time.sleep(0.5)
+
+def key__offer(tool ,partition ,mapper ,key):
+  """
+  Offer the partition to one key, through systemd-cryptsetup, and wait for
+  the answer. The wait is given up as soon as the key or the partition leaves
+  the bus, so that an offer to a key that is gone does not hold every other
+  plug and unplug back; and after OFFER__ANSWER__SECOND, as an offer the key
+  never received. Returns (status ,why): status is "unlocked", "refused",
+  "timeout" (lit, and not touched in time), "gone" (the key left),
+  "drive gone" (the partition left) or "silent" (no answer).
+  """
+  # headless: never fall back to asking for a passphrase, which no one is
+  # shown here; the administrator unlocks by passphrase with the keyword
+  argument = [tool ,"attach" ,mapper ,str(partition) ,"none" ,f"fido2-device={key},headless=yes"]
+  try:
+    process = subprocess.Popen(argument ,stdout=subprocess.PIPE ,stderr=subprocess.PIPE ,text=True)
+  except FileNotFoundError:
+    return "refused" ,f"{tool}: not found"
+  deadline = time.monotonic() + OFFER__ANSWER__SECOND
+  while process.poll() is None:
+    status = None
+    if not Path(key).exists():
+      status ,why = "gone" ,f"the key at {key} left the bus while it was offered, as an OnlyKey does when its PIN is entered"
+    elif not Path(partition).exists():
+      status ,why = "drive gone" ,f"{partition} left the bus while it was offered"
+    elif time.monotonic() > deadline:
+      status ,why = "silent" ,f"no answer within {OFFER__ANSWER__SECOND} seconds, so the key never received it"
+    if status:
+      process.terminate()
+      try:
+        process.wait(timeout=5)
+      except subprocess.TimeoutExpired:
+        process.kill(); process.wait()
+      # an attach cut off part way can leave the mapping open
+      if Path(f"/dev/mapper/{mapper}").exists():
+        run([tool ,"detach" ,mapper])
+      return status ,why
+    time.sleep(0.25)
+  out ,err = process.communicate()
+  if process.returncode == 0:
+    return "unlocked" ,""
+  why = last_line(err) or last_line(out) or f"status {process.returncode}"
+  if "timeout" in why.lower() or "didn't interact" in why.lower():
+    return "timeout" ,why
+  return "refused" ,why
+
 def key__unlock(partition ,mapper ,name ,log ,preview):
   """
   Offer the partition to each key plugged in, one at a time. Returns the
@@ -490,16 +586,41 @@ def key__unlock(partition ,mapper ,name ,log ,preview):
   if preview:
     log.line("unlocked" ,f"storage {name}" ,f"would offer it to {', '.join(key)}, one at a time")
     return key[0]
+  is_waiting = False
   for k in key:
-    log.line("offered" ,f"storage {name}" ,f"to the key at {k}; touch it when it lights")
-    # headless: never fall back to asking for a passphrase, which no one is
-    # shown here; the administrator unlocks by passphrase with the keyword
-    status ,out ,err = run([tool ,"attach" ,mapper ,str(partition) ,"none" ,f"fido2-device={k},headless=yes"] ,timeout=120)
-    if status == 0:
+    is_ready ,why = key__ready(k)
+    if not is_ready:
+      if not Path(k).exists():
+        log.line("waiting" ,f"the key at {k}" ,f"{why}; its return offers it again")
+        is_waiting = True; continue
+      log.line("warning" ,f"the key at {k}" ,f"{why}; offered anyway")
+    elif why:
+      log.line("ready" ,f"the key at {k}" ,why)
+    for count in range(1 ,COUNT_OF__OFFER + 1):
+      again = "" if count == 1 else "again "
+      log.line("offered" ,f"storage {name}" ,f"{again}to the key at {k}; touch it when it lights")
+      status ,why = key__offer(tool ,partition ,mapper ,k)
+      if status != "silent": break
+      log.line("unanswered" ,f"the key at {k}" ,why)
+    if status == "unlocked":
       log.line("unlocked" ,f"storage {name}" ,f"as {mapper}, by the key at {k}")
       return k
-    log.line("refused" ,f"the key at {k}" ,last_line(err) or last_line(out) or f"status {status}")
-  log.error(f"storage {name}" ,"no key plugged in opened it")
+    if status == "drive gone":
+      log.line("skipped" ,f"storage {name}" ,f"{why}; plugging it in again offers it again")
+      return None
+    if status == "timeout":
+      log.line("refused" ,f"the key at {k}" ,f"it was not touched in time ({why}); plug the key or the drive in again to retry")
+    elif status == "gone":
+      log.line("waiting" ,f"the key at {k}" ,f"{why}; its return offers it again")
+      is_waiting = True
+    elif status == "silent":
+      log.line("refused" ,f"the key at {k}" ,f"it answered none of {COUNT_OF__OFFER} offers; plug the key in again to retry")
+    else:
+      log.line("refused" ,f"the key at {k}" ,f"{why}; a locked key refuses at once, and is offered again once its PIN is entered")
+  if is_waiting:
+    log.line("waiting" ,f"storage {name}" ,"not unlocked yet")
+  else:
+    log.error(f"storage {name}" ,"no key plugged in opened it")
   return None
 
 def key__watch(key ,name ,log ,preview):
@@ -545,7 +666,10 @@ def is__hidden__set_all(system_db ,database_uuid ,hidden ,log ,preview):
     else:
       log.line("kept" ,name ,how)
   if changed:
-    # accounts-daemon reads an account's file when it loads the account
+    # accounts-daemon reads an account's file when it first loads the account,
+    # so a change to an account it has loaded, an adopted one, needs it
+    # restarted. The accounts plug makes have their files written before they
+    # are made, and come here unchanged.
     run(["systemctl" ,"try-restart" ,"accounts-daemon.service"])
 
 
@@ -609,8 +733,19 @@ def unplug_locked(spec ,log ,preview):
   if not (record or home_mounted or is__open or Kernel.is__mount_point(dirpa__mount)):
     log.line("skipped" ,f"storage {name}" ,"not plugged in"); return
 
-  # 1. end every process of its accounts, whoever is at the console
+  # unplug run from a shell sitting on the storage could not release it, and
+  # would end that shell's other processes; nothing is done
+  if Kernel.is__mount_point(dirpa__mount):
+    held = ancestor__holding(dirpa__mount)
+    if held:
+      log.error(name ,f"pid {held[0]}, which runs this unplug, has {held[1]} on it; run unplug from a directory"
+                f" not on {name}, such as /root"); return
+
+  # 1. end every process of its accounts, whoever is at the console, then any
+  # other process still holding the storage, such as a shell sitting on it
   process__end([m["system_uid"] for m in list__row] ,log ,preview)
+  if Kernel.is__mount_point(dirpa__mount):
+    holder__end(dirpa__mount ,name ,log ,preview)
 
   # 2. unmount their homes, and record the detach while the storage can be read
   for m in home_mounted:
@@ -629,10 +764,9 @@ def unplug_locked(spec ,log ,preview):
   # an own group another of these accounts was a member of outlives its account; delete it now
   if not preview:
     SameAccount.own_group__delete_left(list__unplugged ,log ,preview)
-  count_of__unplugged = len(list__unplugged)
-  if count_of__unplugged and not preview:
-    # accounts-daemon drops a deleted account from the login screen when it reloads
-    run(["systemctl" ,"try-restart" ,"accounts-daemon.service"])
+  # accounts-daemon notices the change to /etc/passwd on its own and drops the
+  # deleted accounts, and tells the login screen; it is not restarted, since a
+  # login screen that is showing keeps the list the old accounts-daemon gave it
 
   # 4. hide its adopted accounts, which stay, from the login screen
   is__hidden__set_all(system_db ,r["database_uuid"] ,True ,log ,preview)
@@ -713,7 +847,7 @@ def process__end(list__uid ,log ,preview):
   if not pid:
     log.line("kept" ,"processes" ,"none runs under its accounts"); return
   if preview:
-    log.line("ended" ,f"{len(pid)} processes" ,"of its accounts"); return
+    log.line("ended" ,f"{len(pid)} process" + ("" if len(pid) == 1 else "es") ,"of its accounts"); return
   for u in sorted(set__uid):
     run(["loginctl" ,"terminate-user" ,str(u)])
   remaining = process__wait(set__uid ,SESSION_WAIT__SECOND)
@@ -728,7 +862,120 @@ def process__end(list__uid ,log ,preview):
   if remaining:
     log.error("processes" ,f"{len(remaining)} still run under its accounts: {', '.join(map(str ,remaining[:8]))}")
   else:
-    log.line("ended" ,f"{len(pid)} processes" ,"of its accounts")
+    log.line("ended" ,f"{len(pid)} process" + ("" if len(pid) == 1 else "es") ,"of its accounts")
+
+def list__ancestor_pid():
+  """This process and the processes above it, which a holder search passes over."""
+  set__pid = set()
+  pid = os.getpid()
+  while pid > 1 and pid not in set__pid:
+    set__pid.add(pid)
+    try:
+      with open(f"/proc/{pid}/stat") as f:
+        pid = int(f.read().rsplit(")" ,1)[1].split()[1])
+    except (OSError ,ValueError ,IndexError):
+      break
+  set__pid.add(1)
+  return set__pid
+
+def holder__how(pid ,dev):
+  """
+  How process pid holds the file system whose device number is dev: its
+  current directory, its root, its program, a file it has open, or a file it
+  has mapped; None when it does not. A file is matched by the device it is on,
+  which a home's idmapped mount shares with its storage, and which a mount
+  already detached keeps.
+  """
+  dirpa = Path(f"/proc/{pid}")
+  for name ,how in (("cwd" ,"its current directory") ,("root" ,"its root directory") ,("exe" ,"its program")):
+    try:
+      if os.stat(dirpa / name).st_dev == dev: return how
+    except OSError:
+      pass
+  try:
+    for fd in os.listdir(dirpa / "fd"):
+      try:
+        if os.stat(dirpa / "fd" / fd).st_dev == dev: return "a file it has open"
+      except OSError:
+        pass
+  except OSError:
+    pass
+  text = f"{os.major(dev):02x}:{os.minor(dev):02x}"
+  try:
+    with open(dirpa / "maps") as f:
+      for line in f:
+        field = line.split()
+        if len(field) >= 6 and field[3] == text: return "a file it has mapped"
+  except OSError:
+    pass
+  return None
+
+def list__holder(dev):
+  """Each process, other than this one and those above it, that holds the file system dev: (pid ,uid ,command ,how)."""
+  set__skip = list__ancestor_pid()
+  result = []
+  for name in os.listdir("/proc"):
+    if not name.isdigit() or int(name) in set__skip: continue
+    pid = int(name)
+    how = holder__how(pid ,dev)
+    if how is None: continue
+    try:
+      uid = os.stat(f"/proc/{pid}").st_uid
+      with open(f"/proc/{pid}/cmdline" ,"rb") as f:
+        command = f.read().replace(b"\0" ,b" ").decode(errors="replace").strip() or "?"
+    except OSError:
+      continue
+    result.append((pid ,uid ,command ,how))
+  return result
+
+def holder__end(dirp__mount ,name ,log ,preview):
+  """
+  End every process that still holds the storage mounted at dirp__mount once
+  its accounts' processes have ended, whatever account it runs under: a root
+  shell whose current directory is on it keeps the storage from being
+  unmounted, locked and powered off. Each is logged, sent SIGTERM, and after
+  KILL_WAIT__SECOND, SIGKILL. The process running unplug, and those above it,
+  are passed over; unplug_locked refuses to start while one of them holds it.
+  """
+  try:
+    dev = os.stat(dirp__mount).st_dev
+  except OSError:
+    return
+  list__found = list__holder(dev)
+  def account(uid):
+    entry = SameAccount.sa.system_account__by_system_uid(uid)
+    return entry.pw_name if entry else f"uid {uid}"
+  for pid ,uid ,command ,how in list__found:
+    log.line("ended" if preview else "ending" ,f"pid {pid}" ,f"{account(uid)}'s {command[:60]}: {how} is on {name}")
+  if preview or not list__found: return
+  remaining = [p for p ,_ ,_ ,_ in list__found]
+  for sig in (signal.SIGTERM ,signal.SIGKILL):
+    for p in remaining:
+      try:
+        os.kill(p ,sig)
+      except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + KILL_WAIT__SECOND
+    while time.monotonic() < deadline:
+      remaining = [p for p in remaining if Path(f"/proc/{p}").exists() and holder__how(p ,dev)]
+      if not remaining: break
+      time.sleep(0.2)
+    if not remaining: break
+  if remaining:
+    log.error(name ,f"{len(remaining)} processes still hold it: " + ", ".join(map(str ,remaining)))
+  else:
+    log.line("ended" ,f"{len(list__found)} other process" + ("" if len(list__found) == 1 else "es") ,f"that held {name}")
+
+def ancestor__holding(dirp__mount):
+  """(pid ,how) of this process or one above it, such as the shell unplug was run from, that holds the storage; or None."""
+  try:
+    dev = os.stat(dirp__mount).st_dev
+  except OSError:
+    return None
+  for pid in sorted(list__ancestor_pid() - {1}):
+    how = holder__how(pid ,dev)
+    if how: return (pid ,how)
+  return None
 
 def mount__remove(dirp__target ,log ,preview):
   """

@@ -27,7 +27,8 @@ from pathlib import Path
 import Database
 import Kernel
 import AccountsService
-from Common import DIRPA__HOME ,act ,host_name ,valid_name ,dirp__storage__problem ,dirpa__Account_Tree ,delete_mount_point
+from AccountsService import AccountsServiceError
+from Common import SEPARATOR ,DIRPA__HOME ,act ,host_name ,valid_name ,dirp__storage__problem ,dirpa__Account_Tree ,delete_mount_point
 from System import open_system_database
 import SystemAccount as sa
 
@@ -44,6 +45,10 @@ DIRPA__ACCOUNTS_SERVICE__ICON = (Path("/var/lib/AccountsService/icons") ,Path("/
 SAVED__AGING_COLUMN = {"last_change": "password__last_change" ,"minimum": "password__minimum_day",
                        "maximum": "password__maximum_day" ,"warning": "password__warning_day",
                        "inactive": "password__inactive_day" ,"expire": "account__expire"}
+
+def is__child_account(name):
+  """A child account is entered from its parent, never through the login screen."""
+  return SEPARATOR in name
 
 def saved__write(t ,row ,setting):
   """In transaction t, keep the setting of the system account of row."""
@@ -486,6 +491,17 @@ def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict_
     elif list__missing:
       log.line("warning" ,name ,"no longer in " + ", ".join(list__missing) + ", which this system no longer has")
     setting = dict(setting ,list__supplementary_group=[g for g in list__group if g not in list__missing])
+  # accounts-daemon reads an account's AccountsService file once, when it first
+  # loads the account, which it does on its own when /etc/passwd changes. The
+  # file is written first, so that the account is loaded hidden or offered as
+  # it is to be, and the login screen hears of it without accounts-daemon
+  # being restarted. A restarted accounts-daemon leaves a login screen that is
+  # showing with the list it had: GDM's did not show Thomas after a plug.
+  if not preview:
+    try:
+      AccountsService.is__hidden__set(name ,is__child_account(name))
+    except AccountsServiceError as error:
+      log.line("warning" ,name ,f"{error}; the login screen may not show it as it should")
   if not act(log ,preview ,name ,sa.system_account__make ,name ,system_uid ,setting): return False
   system_gid = system_uid if preview else sa.system_account(name).pw_gid
   with system_db.transaction(f"{name} plugged in: system uid {system_uid}" ,preview) as t:
