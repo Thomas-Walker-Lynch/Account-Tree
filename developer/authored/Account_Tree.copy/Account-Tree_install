@@ -8,23 +8,40 @@
 # change it. The systemd units run Account-Tree_admin under root, so the copy
 # they run must be one that no other account can change.
 #
-# The install directory is made to hold exactly the files of the consumer
-# directory: new and changed files are copied, owned by root, and files the
-# consumer directory no longer has are deleted. Python's __pycache__ is left
-# out. Then system configure writes the units and the udev rule, so that they
+# The install directory is made to hold exactly what it is to hold, owned by
+# root, and nothing else: new and changed files are copied, and files no
+# longer to be installed are deleted. Python's __pycache__ is left out. It
+# holds:
+#
+#   the files of the consumer directory, Account-Tree's program
+#   Account_Tree__Gate/Account_Tree__Gate·Request
+#                         the request gate, from the consumer directory
+#                         beside it, consumer/Account_Tree__Gate, setuid root,
+#                         mode 4755: its guard and interpreter, the
+#                         Request·*.py of the program, then run with root's
+#                         rights
+#   Man_In_Grey/          the modules of Man-In-Grey the gate's guard and
+#                         interpreter, and the program's requests, import,
+#                         from the project's dependency on Man-In-Grey
+#
+# Then system configure writes the units and the udev rule, so that they
 # name the installed Account-Tree_admin.
 #
 # Run it under root. Whoever installs code that root runs can act as root, so
 # installing is root's own work.
 
 DIRPA__INSTALL=/usr/local/lib/Account-Tree
+FILEN__GATE="Account_Tree__Gate·Request"
+LIST__MAN_IN_GREY_MODULE=(Language.py Journal.py "Journal·Interface.py" Guard.py "Guard·WellFormed.py"
+                          "Guard·LibraryConstraint.py" Interpreter.py Man_In_Grey.py)
 
 usage(){
   cat <<EOF
 Usage: Account-Tree_install <command>
        Account-Tree_install preview <command>
   help | -h | --help    print this message (also printed when given no arguments)
-  run                   install from $(dirpa__source) into $DIRPA__INSTALL,
+  run                   install from $(dirpa__source), with the request gate
+                        and Man-In-Grey's modules, into $DIRPA__INSTALL,
                         then run Account-Tree_admin system configure
   preview run           print what run would do, change nothing
 EOF
@@ -44,6 +61,45 @@ file_mode(){
   if [ -x "$1" ]; then echo 0755; else echo 0644; fi
 }
 
+# where the gate and Man-In-Grey's modules come from, given the consumer directory
+dirpa__gate_source(){
+  echo "$(dirname "$1")/Account_Tree__Gate"
+}
+dirpa__Man_In_Grey_source(){
+  echo "$(dirname "$(dirname "$1")")/shared/project-dependency/Man-In-Grey/Man_In_Grey"
+}
+
+# what is to be installed, one line each: <path in the install dir> TAB <source> TAB <mode>
+list__install(){
+  local dirpa__source=$1 f m
+  while IFS= read -r f; do
+    printf '%s\t%s\t%s\n' "$f" "$dirpa__source/$f" "$(file_mode "$dirpa__source/$f")"
+  done < <(list__file "$dirpa__source")
+  printf '%s\t%s\t%s\n' "Account_Tree__Gate/$FILEN__GATE" "$(dirpa__gate_source "$dirpa__source")/$FILEN__GATE" 4755
+  for m in "${LIST__MAN_IN_GREY_MODULE[@]}"; do
+    printf '%s\t%s\t%s\n' "Man_In_Grey/$m" "$(dirpa__Man_In_Grey_source "$dirpa__source")/$m" 0644
+  done
+}
+
+# why what is to be installed cannot be, or nothing
+install__problem(){
+  local dirpa__source=$1 target source mode
+  while IFS=$'\t' read -r target source mode; do
+    if [ ! -f "$source" ]; then
+      case "$target" in
+        Account_Tree__Gate/*) echo "no request gate at $source; build and promote the Account_Tree__Gate namespace" ;;
+        Man_In_Grey/*)        echo "no $source; the project's Man-In-Grey dependency is to link Man-In-Grey's consumer/, promoted with pass 6 or later" ;;
+        *)                    echo "no $source" ;;
+      esac
+      return
+    fi
+  done < <(list__install "$dirpa__source")
+  # the kernel ignores the setuid bit on a file system mounted nosuid
+  if findmnt -no OPTIONS -T "$(dirname "$DIRPA__INSTALL")" 2>/dev/null | tr ',' '\n' | grep -qx nosuid; then
+    echo "$(dirname "$DIRPA__INSTALL") is on a file system mounted nosuid, where the request gate would not run with root's rights"
+  fi
+}
+
 install_tree(){
   local preview=$1 dirpa__source=$2
   local count_of__new=0 count_of__replaced=0 count_of__deleted=0 count_of__unchanged=0
@@ -57,25 +113,28 @@ install_tree(){
     [ "$preview" = yes ] || install -d -o root -g root -m 0755 "$DIRPA__INSTALL" || return 1
   fi
 
-  local f mode
-  while IFS= read -r f; do
-    mode=$(file_mode "$dirpa__source/$f")
-    if [ ! -e "$DIRPA__INSTALL/$f" ]; then
-      printf '  %-16s%s\n' "$verb__new" "$f"; count_of__new=$((count_of__new + 1))
-    elif ! cmp -s "$dirpa__source/$f" "$DIRPA__INSTALL/$f" || [ "$(stat -c %a "$DIRPA__INSTALL/$f")" != "${mode#0}" ] \
-         || [ "$(stat -c %u:%g "$DIRPA__INSTALL/$f")" != 0:0 ]; then
-      printf '  %-16s%s\n' "$verb__replaced" "$f"; count_of__replaced=$((count_of__replaced + 1))
+  # install sets the owner before the mode, as the owner's change would clear a
+  # setuid bit set before it
+  local f target source mode
+  local -A set__target=()
+  while IFS=$'\t' read -r target source mode; do
+    set__target["$target"]=1
+    if [ ! -e "$DIRPA__INSTALL/$target" ]; then
+      printf '  %-16s%s\n' "$verb__new" "$target"; count_of__new=$((count_of__new + 1))
+    elif ! cmp -s "$source" "$DIRPA__INSTALL/$target" || [ "$(stat -c %a "$DIRPA__INSTALL/$target")" != "${mode#0}" ] \
+         || [ "$(stat -c %u:%g "$DIRPA__INSTALL/$target")" != 0:0 ]; then
+      printf '  %-16s%s\n' "$verb__replaced" "$target"; count_of__replaced=$((count_of__replaced + 1))
     else
       count_of__unchanged=$((count_of__unchanged + 1)); continue
     fi
     if [ "$preview" != yes ]; then
-      install -D -o root -g root -m "$mode" "$dirpa__source/$f" "$DIRPA__INSTALL/$f" || return 1
+      install -D -o root -g root -m "$mode" "$source" "$DIRPA__INSTALL/$target" || return 1
     fi
-  done < <(list__file "$dirpa__source")
+  done < <(list__install "$dirpa__source")
 
-  # files the consumer directory no longer has
+  # files no longer to be installed
   [ -d "$DIRPA__INSTALL" ] && while IFS= read -r f; do
-    if [ ! -e "$dirpa__source/$f" ]; then
+    if [ -z "${set__target[$f]:-}" ]; then
       printf '  %-16s%s\n' "$verb__deleted" "$f"; count_of__deleted=$((count_of__deleted + 1))
       [ "$preview" = yes ] || rm -f -- "$DIRPA__INSTALL/$f" || return 1
     fi
@@ -110,6 +169,12 @@ CLI(){
   fi
   if [ "$dirpa__source" = "$DIRPA__INSTALL" ]; then
     echo "Error: this is the installed copy; run the Account-Tree_install in the project's consumer directory." >&2
+    return 1
+  fi
+  local problem
+  problem=$(install__problem "$dirpa__source")
+  if [ -n "$problem" ]; then
+    echo "Error: $problem." >&2
     return 1
   fi
 

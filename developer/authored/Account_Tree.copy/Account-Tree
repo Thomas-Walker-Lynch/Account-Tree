@@ -10,14 +10,22 @@ account with its own files and processes, entered through its parent rather
 than through the system's login programs.
 
 This is the application shell. It shows what exists and greys out every
-option that has no implementation yet. It changes nothing, and runs with
-the privileges of the account that started it.
+option that has no implementation yet. It runs with the privileges of the
+account that started it. What it cannot do with them, such as starting a
+session of a child account, it asks of the request gate, which decides from
+the account tree's records whether this account can have it done.
 
 Usage: Account-Tree <command> [argument ...]
   help | -h | --help   print this message (also printed when given no arguments)
   window [<account>]   open the resource window for <account>, default your own
   list [<account>]     print the child accounts of <account>, default your own
   resource             print the kinds of resource, and which have an allocator
+  enter <account>      start a login shell of <account>, an account below yours,
+                       in this terminal; the shell, and every program started
+                       from it, runs under <account>, and can open windows on
+                       your display. <account> is its full name, or the part
+                       after your own name and the '·', as developer for
+                       Thomas·developer. The session ends when its shell does
 """
 
 import sys ,os
@@ -66,10 +74,41 @@ def command__resource(rest):
       print(f"  {kind.name:<20}{state:<13}{kind.description}")
   return 0
 
+def account_name__below(text):
+  "the full name of an account named by its full name or by the part below the acting account"
+  if AccountTree.SEPARATOR in text:
+    return text
+  return AccountTree.child_account__name(AccountTree.acting_account().name ,text)
+
+def command__enter(rest):
+  if len(rest) != 1:
+    print("Error: enter is given one account name." ,file=sys.stderr)
+    return 1
+  import Request·Composer as composer
+  import Terminal
+  try:
+    name = account_name__below(rest[0])
+  except ValueError as error:
+    print(f"Error: {error}" ,file=sys.stderr)
+    return 1
+  try:
+    fd__master = composer.enter(name)
+  except composer.RequestError as error:
+    if error.output:
+      print(error.output.rstrip() ,file=sys.stderr)
+    print(f"Error: {error}" ,file=sys.stderr)
+    return 1
+  try:
+    Terminal.relay(fd__master)
+  finally:
+    os.close(fd__master)
+  return 0
+
 COMMAND = {
   "window": command__window,
   "list": command__list,
   "resource": command__resource,
+  "enter": command__enter,
 }
 
 def CLI(argv=None):

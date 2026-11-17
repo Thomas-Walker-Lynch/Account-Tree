@@ -1,0 +1,13 @@
+
+Four objectives:
+
+1. an account tree, such that person logged in on a parent account can login into a child account without a password.
+2. parent account can move files between the child accounts with automatic ownership changes.
+3. shared configuration files
+4. root installed software version
+
+Each account is its own read only mount tree, with a writeable overlay over the top. Thus root
+
+Each login user has its own mount namespace that is read
+
+GUI controls upgrade/downgrade of file permissions.
