@@ -11,6 +11,8 @@ ctypes, for the work that Account-Tree does on mounts, files and sessions.
   immutable__set         set or clear a directory's immutable flag
   set__session__system_uid
                         the system uids that have a login session
+  inotify__watch         a descriptor the kernel makes readable when a file is
+                        written, and inotify__read, what it reports
 
 home__mount uses the mount calls Linux has had since 5.12: open_tree clones the
 source as a detached mount, mount_setattr gives it its attributes and its
@@ -43,6 +45,14 @@ MNT_DETACH = 0x00000002
 FS_IOC_GETFLAGS = 0x80086601
 FS_IOC_SETFLAGS = 0x40086602
 FS_IMMUTABLE_FL = 0x00000010
+
+IN_NONBLOCK = os.O_NONBLOCK
+IN_CLOEXEC = os.O_CLOEXEC
+IN_CLOSE_WRITE = 0x00000008
+IN_ATTRIB = 0x00000004
+IN_DELETE_SELF = 0x00000400
+IN_MOVE_SELF = 0x00000800
+IN_IGNORED = 0x00008000
 
 
 class KernelError(Exception):
@@ -179,3 +189,49 @@ def set__session__system_uid():
     return {pointer[i] for i in range(count)}
   finally:
     LIBC.free(pointer)
+
+
+# --------------------------------------------------------------------------------
+# file change notices
+
+def inotify__watch(fpa__watched):
+  """
+  A descriptor on which the kernel reports changes to the file fpa__watched:
+  it becomes readable once the file has been written and closed, or has
+  gone. Nothing is polled: the kernel keeps the watch on the file's inode and
+  queues an event on the descriptor when the file changes, so a program
+  waiting on it, in select or in GLib's main loop, sleeps until then. The
+  file need only be readable by the caller; its directory is not listed.
+  """
+  fd = check(LIBC.inotify_init1(IN_NONBLOCK | IN_CLOEXEC) ,"inotify_init1")
+  try:
+    check(LIBC.inotify_add_watch(fd ,os.fsencode(fpa__watched)
+                                 ,IN_CLOSE_WRITE | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF)
+          ,f"inotify_add_watch {fpa__watched}")
+  except KernelError:
+    os.close(fd)
+    raise
+  return fd
+
+def inotify__read(fd):
+  """
+  (whether the file was written ,whether the watch has ended, the file gone
+  or moved) from the events queued on fd, read until none is left. An event
+  is a struct inotify_event: wd, mask, cookie and len, four 32-bit words, then
+  len bytes of name, which a watch on a file leaves empty.
+  """
+  is__written = is__ended = False
+  while True:
+    try:
+      data = os.read(fd ,4096)
+    except BlockingIOError:
+      break
+    if not data:
+      break
+    i = 0
+    while i + 16 <= len(data):
+      _ ,mask ,_ ,length = struct.unpack_from("iIII" ,data ,i)
+      i += 16 + length
+      if mask & (IN_CLOSE_WRITE | IN_ATTRIB): is__written = True
+      if mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED): is__ended = True
+  return is__written ,is__ended

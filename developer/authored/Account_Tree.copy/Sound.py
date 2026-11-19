@@ -28,8 +28,9 @@ revoked, never "granted" or "permitted", so neither word is ever a verb.
 For each bus end an account other than the login account holds a full
 permit for, there is a FIFO between it and the hub under
 /run/Account-Tree/bus/<account>/. The routers, which carry out the tables
-under each account, are not written yet; after a change this module tells
-the routers concerned to reload, which does nothing where none runs.
+under each account, Sound·Router.py, watch their tree's notice, Notice.py;
+after a change this module writes it, and each router of the tree asks again
+what it is to do.
 
 Read functions take a storage database and a system database either as
 Database.Database or as a read-only sqlite3 connection, so the request
@@ -63,6 +64,7 @@ import os ,re ,sqlite3 ,subprocess
 from pathlib import Path
 
 import Database
+import Notice
 import StoragePlug
 import SystemAccount as sa
 from Common import act
@@ -79,7 +81,6 @@ BUS_NAME__LENGTH_MAX = 64
 BUS_NUMBER__MAX = 999
 DEPTH_MAX = 64
 DIRPA__BUS = Path("/run/Account-Tree/bus")
-UNIT__ROUTER = "Account-Tree_router.service"
 
 LIST__BUS__DEFAULT = ((1 ,"system sound") ,(2 ,"system microphone"))
 
@@ -744,9 +745,7 @@ def connection__set(asking ,name ,text ,log ,preview):
       table__write(t ,account ,list__line_)
     count = sum(1 for line in list__line_ if line["endpoint__kind"] != KIND__COMMENT)
     log.line("set" ,f"the connection table of {name}" ,f"{count} connection lines{', the default' if text is None else ''}")
-    router__reload(system_name__of(system_db ,storage_db.uuid() ,account) ,log ,preview)
-    if not is__login(account):
-      router__reload(login_name ,log ,preview)
+    Notice.notice__give(login_name ,log ,preview)
     return True
 
 def connection__reset(asking ,name ,log ,preview):
@@ -784,7 +783,7 @@ def bus__set(asking ,number ,name ,log ,preview):
         log.line("renamed" ,f"bus {number}" ,f"from {now['name']} to {name}")
       else:
         log.line("kept" ,f"bus {number}" ,f"already named {name}")
-    return fifo__sync(system_db ,storage_db ,login ,log ,preview ,is__reload_all=True)
+    return fifo__sync(system_db ,storage_db ,login ,log ,preview)
 
 def bus__remove(asking ,number ,log ,preview):
   """
@@ -805,7 +804,7 @@ def bus__remove(asking ,number ,log ,preview):
         t.execute("DELETE FROM sound_permit_bus_end WHERE database_uid = ? AND bus__number = ?" ,(a["database_uid"] ,number))
       t.execute("DELETE FROM sound_bus WHERE login__database_uid = ? AND bus__number = ?" ,(login["database_uid"] ,number))
     log.line("removed" ,f"bus {number}" ,"with the permits for its ends")
-    return fifo__sync(system_db ,storage_db ,login ,log ,preview ,is__reload_all=True)
+    return fifo__sync(system_db ,storage_db ,login ,log ,preview)
 
 def account__forget(t ,account):
   "within the transaction t, delete an account's sound rows, as deallocation does"
@@ -815,22 +814,6 @@ def account__forget(t ,account):
 
 # --------------------------------------------------------------------------------
 # changing: the FIFOs and the routers
-
-def router__reload(system_account__name ,log ,preview):
-  """
-  Tell the router running under the account to reload, so it asks again for
-  what it is to do. Nothing is done when the account has no systemd user
-  instance, or no router.
-  """
-  entry = sa.system_account(system_account__name)
-  if entry is None or not Path(f"/run/user/{entry.pw_uid}/systemd/private").exists():
-    return
-  if preview:
-    log.line("reload" ,f"{UNIT__ROUTER} of {system_account__name}"); return
-  done = subprocess.run(["systemctl" ,"--user" ,f"--machine={system_account__name}@" ,"reload" ,UNIT__ROUTER]
-                        ,stdin=subprocess.DEVNULL ,stdout=subprocess.DEVNULL ,stderr=subprocess.DEVNULL)
-  if done.returncode == 0:
-    log.line("reloaded" ,f"{UNIT__ROUTER} of {system_account__name}")
 
 def directory__make(dirpa__account):
   """
@@ -894,12 +877,11 @@ def fifo__remove__path(path ,log ,preview):
   log.line("deleted" ,str(path))
   return True
 
-def fifo__sync(system_db ,storage_db ,login ,log ,preview ,is__reload_all=False):
+def fifo__sync(system_db ,storage_db ,login ,log ,preview):
   """
   Make and delete the FIFOs of login's tree so they match its records, and
-  tell the routers whose FIFOs changed to reload, and the hub's; with
-  is__reload_all, every router in the tree. Returns False when a FIFO could
-  not be made or deleted.
+  write the tree's notice, so its windows and routers read again. Returns
+  False when a FIFO could not be made or deleted.
   """
   database_uuid = storage_db.uuid()
   login_name = system_name__of(system_db ,database_uuid ,login)
@@ -907,14 +889,12 @@ def fifo__sync(system_db ,storage_db ,login ,log ,preview ,is__reload_all=False)
   list__name = [n for n in (system_name__in_use(system_db ,database_uuid ,a) for a in list__tree(storage_db ,login)
                             if not is__login(a)) if n is not None]
   is__done = True
-  set__changed = set()
   for name in list__name:
     dirpa = DIRPA__BUS / name
     if not dirpa.is_dir(): continue
     for path in sorted(dirpa.iterdir()):
       if path not in desired:
         is__done = fifo__remove__path(path ,log ,preview) and is__done
-        set__changed.add(name)
   for path ,(name ,_ ,end) in sorted(desired.items()):
     if path.exists() or path.is_symlink():
       if is__fifo_current(path ,name ,login_name ,end):
@@ -923,14 +903,11 @@ def fifo__sync(system_db ,storage_db ,login ,log ,preview ,is__reload_all=False)
       if not fifo__remove__path(path ,log ,preview):
         is__done = False; continue
     is__done = fifo__make(path ,name ,login_name ,end ,log ,preview) and is__done
-    set__changed.add(name)
   for name in list__name:
     dirpa = DIRPA__BUS / name
     if dirpa.is_dir() and not preview and not any(dirpa.iterdir()):
       os.rmdir(dirpa)
-  for name in (list__name if is__reload_all else sorted(set__changed)):
-    router__reload(name ,log ,preview)
-  router__reload(login_name ,log ,preview)
+  Notice.notice__give(login_name ,log ,preview)
   return is__done
 
 def fifo__sync_storage(system_db ,storage_db ,log ,preview):

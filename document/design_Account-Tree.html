@@ -854,7 +854,7 @@
       </ul>
 
       <p>
-        A refused connection table stays in the panel as typed, to be corrected. <RT·code>Account-Tree window</RT·code> draws the window itself for the current account, asks <RT·code>window_open</RT·code> for an account below it, and refuses an account above it.
+        Each window watches its tree's notice (see Router in <RT·code>design_audio.html</RT·code>): a change made anywhere in the tree, from another window, a command or the administrator, reaches every window of the tree, which reads its panels again. A connection table being edited and not yet saved keeps its text through that. A refused connection table stays in the panel as typed, to be corrected. A window opened before Account-Tree was installed again does not ask the gate in the old form: <RT·code>Request·Composer</RT·code> sees the request language on disk changed and refuses, saying to start the program again. <RT·code>Account-Tree window</RT·code> draws the window itself for the current account, asks <RT·code>window_open</RT·code> for an account below it, and refuses an account above it.
       </p>
 
       <p>
@@ -866,6 +866,7 @@
         <li><RT·code>ChildAccount.py</RT·code>: making and deallocating a child account.</li>
         <li><RT·code>Share.py</RT·code>: making, ending, recording and applying shares.</li>
         <li><RT·code>Sound.py</RT·code>: the sound of a tree: its buses, the permits and their marks, the connection tables, and the FIFOs between the hub and the accounts.</li>
+        <li><RT·code>Notice.py</RT·code>: a tree's notice, written after each change and watched, through <RT·code>Kernel.inotify__watch</RT·code>, by the tree's windows and routers.</li>
         <li><RT·code>Sound·Router.py</RT·code>: the router's plan, made from the gate's answer, and the router that carries it out in the account's PipeWire.</li>
         <li><RT·code>Storage.py</RT·code>, <RT·code>StoragePlug.py</RT·code>, <RT·code>System.py</RT·code> and <RT·code>SameAccount.py</RT·code>: the storage databases and attach; plug and unplug, and the lock; the system database and limits; which accounts are the same account, and the settings carried between systems.</li>
         <li><RT·code>Database.py</RT·code>: the two kinds of database, their hash chain and their schemas. Once the record gate is built, imported by the record interpreter only, so that no root process opens a database.</li>

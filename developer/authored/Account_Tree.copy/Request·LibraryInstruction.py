@@ -42,6 +42,7 @@ import grp ,os ,pwd ,secrets ,subprocess
 
 import Common
 import ChildAccount
+import Notice
 import Share
 import Sound
 import SystemAccount as sa
@@ -220,6 +221,7 @@ class LibraryInstruction:
     if result is None:
       raise log.failure(f"making {account_name}")
     made.append(result)
+    Notice.notice__give(Notice.login__of_name(account_name) ,log ,False)
 
   def deallocate(self ,account_name):
     log = LogInterpreter(self._log)
@@ -230,11 +232,13 @@ class LibraryInstruction:
     log = LogInterpreter(self._log)
     if not Share.share__with(account_name ,list__account_name ,log ,False):
       raise log.failure(f"sharing {account_name}")
+    Notice.notice__give(Notice.login__of_name(account_name) ,log ,False)
 
   def share_remove(self ,account_name ,list__account_name):
     log = LogInterpreter(self._log)
     if not Share.share__remove(account_name ,list__account_name ,log ,False):
       raise log.failure(f"ending shares of {account_name}")
+    Notice.notice__give(Notice.login__of_name(account_name) ,log ,False)
 
   def sound_show(self ,account_name ,sound):
     log = LogInterpreter(self._log)

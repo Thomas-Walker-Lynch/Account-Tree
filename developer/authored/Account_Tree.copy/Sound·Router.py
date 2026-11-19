@@ -4,8 +4,11 @@ Sound·Router - the router: what carries out an account's sound in its own
 PipeWire, under the account. See developer/design_audio.html.
 
 The router asks the request gate, with sound_route_show, what it is to do,
-at start and each time it is told to reload (SIGHUP), and builds a plan from
-the answer:
+at start, each time its tree's notice is written (Notice.py), and when told
+to reload (SIGHUP), and builds a plan from the answer. Reloading changes
+only what the new plan changes: a tunnel, a loopback or the node holder
+whose description is the same keeps running, so a reload does not interrupt
+the sound already flowing.
 
   in the hub, the login account's PipeWire
     a node for each bus, a null sink of media class Audio/Bus, which the
@@ -40,9 +43,11 @@ alone.
   Router                  carries out plans, from run() until stopped
 """
 
-import json ,os ,re ,signal ,subprocess ,sys ,threading ,time
+import json ,os ,re ,select ,signal ,subprocess ,sys ,threading ,time
 import queue as queue_
 from pathlib import Path
+
+import Notice
 
 PROP__MARK = "account_tree.stream"
 LIST__CHANNEL = ("FL" ,"FR")
@@ -259,10 +264,12 @@ def is__marked(props):
 class Router:
   """
   Carries out the plans for the account it runs under. log(text) reports;
-  fetch() is to return the route, or None, sound_route_show's answer.
+  fetch() is to return the route, sound_route_show's answer, or None when the
+  request failed; is__updated() whether Account-Tree was installed again
+  since the router started, when it starts again with the new code.
   """
-  def __init__(self ,name ,fetch ,log):
-    self.name ,self.fetch ,self.log = name ,fetch ,log
+  def __init__(self ,name ,fetch ,log ,is__updated=lambda: False):
+    self.name ,self.fetch ,self.log ,self.is__updated = name ,fetch ,log ,is__updated
     self.plan = Plan()
     self.graph = Graph()
     self.event = queue_.Queue()
@@ -423,8 +430,54 @@ class Router:
 
   # ---- running
 
+  def notice__start(self):
+    "watch the tree's notice, in a thread that puts a reload on the queue for each"
+    threading.Thread(target=self.notice__read ,args=(Notice.Watch(Notice.login__of_name(self.name)),) ,daemon=True).start()
+
+  def notice__read(self ,watch):
+    """
+    Wait on the notice. Until the tree's first change since the system
+    started there is no notice file to watch, and the watch is tried again
+    every few seconds; once it can be made, a change has been made, and the
+    router reloads. Notices that come together make one reload.
+    """
+    is__first = True
+    while True:
+      if not watch.open():
+        is__first = False
+        time.sleep(SECOND__POLL); continue
+      if not is__first:
+        is__first = True
+        self.event.put(("reload" ,None))
+      select.select([watch.fd] ,[] ,[])
+      if watch.read():
+        time.sleep(0.2)
+        watch.read()
+        self.event.put(("reload" ,None))
+
+  def restart__if_updated(self):
+    """
+    When Account-Tree was installed again, end what this router runs and run
+    the program anew, in this process, so the new code carries out the plan
+    and its requests are in the form the gate now takes. The sound stops for
+    the moment the new router takes to start.
+    """
+    if not self.is__updated():
+      return
+    self.log("Account-Tree was installed again; the router starts again with the new code")
+    self.stop()
+    if self.monitor and self.monitor.poll() is None:
+      self.monitor.terminate()
+    os.execv(sys.executable ,[sys.executable] + sys.argv)
+
   def reload(self):
+    self.restart__if_updated()
     route = self.fetch()
+    if route is None:
+      # A request that failed is not an answer of no route: what runs is
+      # kept, and the next notice, or SIGHUP, asks again.
+      self.log("kept what runs, as the route could not be read")
+      return
     self.plan = plan__of(route ,self.name)
     self.count__unlink = {}
     self.node__apply()
@@ -438,6 +491,7 @@ class Router:
     signal.signal(signal.SIGTERM ,lambda *_: self.event.put(("stop" ,None)))
     signal.signal(signal.SIGINT ,lambda *_: self.event.put(("stop" ,None)))
     self.monitor__start()
+    self.notice__start()
     self.reload()
     try:
       while True:
@@ -457,6 +511,7 @@ class Router:
             self.monitor__start()
           continue
         elif kind == "poll":
+          self.restart__if_updated()
           dead = [k for k ,(p ,_) in self.process.items() if p.poll() is not None]
           if dead or (self.node_holder and self.node_holder[0].poll() is not None):
             for k in dead: self.log(f"{k} ended; starting it again")

@@ -68,6 +68,29 @@ class RequestError(Exception):
 def definition():
   return Language.Definition(language_module.NAME ,language_module.DEFINITION)
 
+def stamp__file(fpa):
+  "what changes when a file is installed again: its inode, size and time of change; None when it is gone"
+  try:
+    st = os.stat(fpa)
+  except OSError:
+    return None
+  return (st.st_ino ,st.st_size ,st.st_mtime_ns)
+
+FPA__LANGUAGE = Path(language_module.__file__).resolve()
+STAMP__LANGUAGE = stamp__file(FPA__LANGUAGE)
+
+def is__updated():
+  """
+  Whether the request language on disk is no longer the one this program
+  loaded: Account-Tree was installed again after it started. The guard
+  refuses a journal composed against another definition, so a long-running
+  program, a window or a router, is to start again rather than ask.
+  """
+  return stamp__file(FPA__LANGUAGE) != STAMP__LANGUAGE
+
+UPDATED = ("Account-Tree was installed again after this program started, and the request gate now takes requests"
+           " in another form; start the program again")
+
 def admit__quiet(journal_bytes):
   """
   Invoke the request gate with the journal, keeping what the gate, the guard
@@ -113,6 +136,8 @@ def request(what ,operation ,list__argument ,result_type=None):
   result, and what the gate, the guard and the interpreter said. Raises
   RequestError, naming what was asked, as what.
   """
+  if is__updated():
+    raise RequestError(f"{what} was not made: {UPDATED}")
   composed = Journal·Interface.JournalComposed(definition())
   journal_iface = Journal·Interface.JournalInterface(composed)
   if result_type is not None:

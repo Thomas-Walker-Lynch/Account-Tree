@@ -40,6 +40,7 @@ so it opens on Wayland directly, or on X when that is what the session has.
 import os ,shutil ,subprocess
 
 import AccountTree
+import Notice
 import ResourceKind
 import Share
 
@@ -288,6 +289,12 @@ def build_window_class(Gtk ,GLib):
       scroller.set_child(grid)
       self.set_child(scroller)
       GLib.timeout_add_seconds(STATE_REFRESH__SECONDS ,self.refresh_child_state)
+      # the tree's notice: a change made anywhere in the tree, from another
+      # window, a command, or the administrator, reaches this window
+      self.notice = Notice.Watch(Notice.login__of_name(window_account.name))
+      self.notice__source = None
+      self.is__refresh_due = False
+      self.notice__attach()
 
     # ----------------------------------------------------------------------------
     # requests
@@ -385,7 +392,43 @@ def build_window_class(Gtk ,GLib):
       box.append(self.option("make child account" ,f"make an account below {self.window_account.name}"
                              ,self.child_account__make))
 
+    def notice__attach(self):
+      """
+      Hold the watch on the tree's notice and have GLib's main loop wake on
+      it. False when the notice file does not exist yet, before the tree's
+      first change since the system started; the state timer tries again.
+      """
+      if not self.notice.open():
+        return False
+      self.notice__source = GLib.unix_fd_add_full(GLib.PRIORITY_DEFAULT ,self.notice.fd ,GLib.IOCondition.IN
+                                                  ,self.notice__on)
+      return True
+
+    def notice__on(self ,fd ,condition):
+      is__changed = self.notice.read()
+      if is__changed and not self.is__refresh_due:
+        # notices that come together make one refresh
+        self.is__refresh_due = True
+        GLib.timeout_add(200 ,self.refresh)
+      if self.notice.fd is None:
+        self.notice__source = None
+        return False                   # the file went; the state timer watches it again
+      return True
+
+    def refresh(self):
+      "read every panel again, after a notice; an unsaved edit of the connection table is kept"
+      self.is__refresh_due = False
+      self.child__fill()
+      self.share__fill()
+      self.sound__fill()
+      return False
+
     def refresh_child_state(self):
+      if not self.get_visible():
+        self.notice.close()
+        return False
+      if self.notice__source is None and self.notice__attach():
+        self.refresh()                 # the notice file was made, so a change was made
       list__name = [child.name for child in AccountTree.list__child_account(self.window_account.name)]
       if list__name != [child.name for child ,_ in self.child_state__label]:
         self.child__fill()             # made or deallocated from elsewhere
@@ -448,13 +491,20 @@ def build_window_class(Gtk ,GLib):
     # ----------------------------------------------------------------------------
     # sound
 
-    def sound__fill(self):
+    def sound__fill(self ,is__edit_kept=True):
       """
       Fill the Sound panel from sound_show: the grant, the buses, the permit
       marks of the window account and its child accounts, and the window
       account's connection table. The window account's own marks decide
-      which permits it can issue and revoke for its child accounts.
+      which permits it can issue and revoke for its child accounts. With
+      is__edit_kept, a connection table edited and not saved keeps its text.
       """
+      edit = None
+      buffer = getattr(self ,"connection__buffer" ,None)
+      if is__edit_kept and buffer is not None and buffer.get_modified():
+        edit = buffer.get_text(buffer.get_start_iter() ,buffer.get_end_iter() ,False)
+      self.connection__buffer = None
+      self.connection__edit = edit
       box = self.sound__box
       box__clear(box)
       name = self.window_account.name
@@ -593,7 +643,16 @@ def build_window_class(Gtk ,GLib):
                             " matched against a program's name. A line beginning with # is a comment." ,dim=True))
       text = Gtk.TextView(wrap_mode=Gtk.WrapMode.NONE ,monospace=True)
       text.add_css_class("account-tree-text")
-      text.get_buffer().set_text(sound["connection"])
+      buffer = text.get_buffer()
+      if self.connection__edit is not None and self.connection__edit != sound["connection"]:
+        buffer.set_text(self.connection__edit)
+        buffer.set_modified(True)
+        box.append(self.label("your edit, not yet saved, is kept while the panel was read again after a change in the tree; save replaces the table with this text"
+                              ,dim=True))
+      else:
+        buffer.set_text(sound["connection"])
+        buffer.set_modified(False)
+      self.connection__buffer = buffer
       scroller = Gtk.ScrolledWindow(min_content_height=120 ,hexpand=True)
       scroller.set_child(text)
       box.append(scroller)
@@ -619,7 +678,7 @@ def build_window_class(Gtk ,GLib):
       what = f"{'reset' if text is None else 'set'} the connection table of {name}"
       # a refused table stays in the panel as typed, to be corrected
       if self.request(what ,composer.sound_connection_set ,name ,text) is not None:
-        self.sound__fill()
+        self.sound__fill(is__edit_kept=False)
 
     def sound__bus_set(self ,number ,name):
       self.request(f"set bus {number}, named {name}" ,composer.sound_bus_set ,number ,name)

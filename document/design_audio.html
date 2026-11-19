@@ -234,7 +234,7 @@
       <h2>Router</h2>
 
       <p>
-        The router, <RT·code>Account-Tree_router</RT·code>, with its code in <RT·code>Sound·Router.py</RT·code>, runs under each account from the user unit <RT·code>Account-Tree_router.service</RT·code>, which <RT·code>Account-Tree_admin system configure</RT·code> installs in <RT·code>/etc/systemd/user</RT·code> and enables for every account but the system's own, <RT·code>ConditionUser=!@system</RT·code>. At start, and each time it is told to reload, it gives a request to the request gate, <RT·code>sound_route_show</RT·code>, and is answered with its account's program lines in force and, for each bus end the account holds a full permit for, the FIFO to use; the hub's router is answered with the tree's buses, the hub's side of every FIFO of the tree, and the device connections in force. An account in no tree, or in a tree whose login account holds no grant, is answered no route, and its router waits to be told to reload. Communication across the privilege boundary goes through the gate; the FIFOs are files because they are the sound channels themselves, and their permissions are the enforcement.
+        The router, <RT·code>Account-Tree_router</RT·code>, with its code in <RT·code>Sound·Router.py</RT·code>, runs under each account from the user unit <RT·code>Account-Tree_router.service</RT·code>, which <RT·code>Account-Tree_admin system configure</RT·code> installs in <RT·code>/etc/systemd/user</RT·code> and enables for every account but the system's own, <RT·code>ConditionUser=!@system</RT·code>. At start, and each time its tree's notice is written, it gives a request to the request gate, <RT·code>sound_route_show</RT·code>, and is answered with its account's program lines in force and, for each bus end the account holds a full permit for, the FIFO to use; the hub's router is answered with the tree's buses, the hub's side of every FIFO of the tree, and the device connections in force. An account in no tree, or in a tree whose login account holds no grant, is answered no route, and its router waits for the next notice. Communication across the privilege boundary goes through the gate; the FIFOs are files because they are the sound channels themselves, and their permissions are the enforcement.
       </p>
 
       <p>
@@ -253,7 +253,15 @@
       </p>
 
       <p>
-        The request interpreter, after any change, tells each affected router to reload, with <RT·code>systemctl --user --machine=&lt;account&gt;@ reload Account-Tree_router.service</RT·code>, which sends it SIGHUP. The signal carries no data; the router asks again.
+        After any change to a tree, the request interpreter, or the administrator's program, writes the tree's notice, <RT·code>/run/Account-Tree/notice/&lt;login account&gt;</RT·code>, a file of root's, mode 0644, in a directory of mode 0711 (<RT·code>Notice.py</RT·code>). Every router of the tree, and every window open on an account of it, holds a watch on the file through Linux's inotify: the kernel keeps the watch on the file's inode and, when the file is written, makes the watcher's descriptor readable, so the router's thread, waiting in <RT·code>select</RT·code>, and the window's main loop wake. Nothing polls, and no list of watchers is kept: the kernel holds the watches, and a process that ends holds none. The notice carries no data; each reader asks the gate again, with its own authority. A reload changes only what the new plan changes: a tunnel, a loopback or the node holder whose description is the same keeps running, so the sound already flowing goes on. SIGHUP, as <RT·code>systemctl --user reload Account-Tree_router.service</RT·code> sends, also reloads a router. A request that fails, unlike an answer of no route, leaves what runs in place.
+      </p>
+
+      <p>
+        A router runs for as long as its account's session, so it outlives an installation of a new Account-Tree. The guard refuses a journal composed against another definition of the request language than its own, and a router still holding the old one would be refused from then on. So the router compares, at each reload and every few seconds, the files of the installed program with those it started from, and when they differ it ends its tunnels and nodes and runs the program anew in its own process: the sound stops for the moment the new router takes to start, and the new code carries on.
+      </p>
+
+      <p>
+        Man-In-Grey carries a call across the privilege boundary: one journal, from one account, played once, with its answer. A notice is the other direction, from root to every process of a tree at once, and says only that something changed; what changed is then read through the gate. So the requests go through Man-In-Grey, and the notice is a file written and watched.
       </p>
 
       <h2>Bit bucket</h2>
@@ -344,12 +352,12 @@
       <h1>Life cycle</h1>
 
       <ul>
-        <li><em>Grant issued</em>: the hub's router is told to reload, and makes the buses and the device connections; every router in the tree with a full permit then connects.</li>
-        <li><em>Grant revoked</em>: every router in the tree is told to reload, and disconnects; the records stay.</li>
-        <li><em>Permit issued or revoked, table saved</em>: the FIFOs are made or deleted, and the routers of the account, of the accounts below it whose marks change, and of the hub, are told to reload.</li>
+        <li><em>Grant issued</em>: the tree's notice is written; the hub's router makes the buses and the device connections, and every router in the tree with a full permit connects.</li>
+        <li><em>Grant revoked</em>: the notice is written, and every router in the tree disconnects; the records stay.</li>
+        <li><em>Permit issued or revoked, table saved</em>: the FIFOs are made or deleted, and the notice is written; each router and window of the tree reads again.</li>
         <li><em>Enter</em>: the account's systemd <RT·code>--user</RT·code> instance starts its router.</li>
         <li><em>Unplug</em>: the tree's FIFOs are deleted before the system accounts are, so no FIFO outlives the uid it was made for; the routers end with the other processes.</li>
-        <li><em>Deallocate</em>: the account's FIFOs and rows are deleted, and the hub's router is told to reload.</li>
+        <li><em>Deallocate</em>: the account's FIFOs and rows are deleted, and the notice is written.</li>
       </ul>
 
       <h1>State of the code</h1>
@@ -388,7 +396,14 @@
         <li>Mix-minus: giving an account's broadcast connection the sum of its bus without that account's own contribution.</li>
         <li>Patterns matched against other stream properties, such as <RT·code>application.name</RT·code> or <RT·code>media.role</RT·code>.</li>
         <li>A graphical editor for the connection table, in place of the text.</li>
+        <li>A connection mark in the Permit panel: beside each full mark, whether a program of that account is connected to that bus end at the moment, read from the routers and kept current as streams start and stop. With it, the login account's window shows who is on each bus without opening each account's window.</li>
       </ul>
+
+      <h2>Persistent window, the alternative not taken</h2>
+
+      <p>
+        The connection mark answers a need that persistent windows would also answer. Without either, the person at the login account's window sees who holds a permit for each bus end, and has to open each account's window to see its connection table and what is playing. With persistent windows, the windows open at a logout, or at an unplug, would be recorded and opened again at the next login or plug, on any system, so the places being configured come back without a search; it would appeal to people used to patch panel programs, whose patches are lost at logout. The patches themselves are not at stake here, as permits, buses and connection tables are records on the storage, which the routers carry out again wherever it is plugged. Against recording windows: a window belongs to one desktop session on one display, its place, its workspace and whether the person still wants it; a record of it would claim a window open after a crash or an unplug; and reopening windows is the desktop's session restore. The connection mark shows what the search would find, in the one window, so it is the feature planned.
+      </p>
 
     </RT·article>
   </body>

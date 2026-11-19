@@ -16,8 +16,9 @@ usage:
                                arguments)
 
 The router is started by the user unit Account-Tree_router.service, which
-Account-Tree_admin system configure installs for every account, and which the
-request interpreter tells to reload after a change to the account's sound.
+Account-Tree_admin system configure installs for every account. It reloads
+when its tree's notice is written after a change, /run/Account-Tree/notice/
+<login account>, and on SIGHUP, as systemctl --user reload sends.
 See developer/design_audio.html and Sound·Router.py.
 """
 
@@ -43,6 +44,28 @@ def fetch():
         log(f"  {line.strip()}")
     return None
 
+DIRPA__HERE = os.path.dirname(os.path.realpath(__file__))
+
+def stamp__install():
+  "the inode, size and time of change of each file of the installed program, its Man-In-Grey modules included"
+  result = {}
+  for dirpa in (DIRPA__HERE ,os.path.join(DIRPA__HERE ,"Man_In_Grey")):
+    try:
+      list__name = os.listdir(dirpa)
+    except OSError:
+      continue
+    for name in list__name:
+      if name.endswith(".pyc") or name == "__pycache__": continue
+      st = composer.stamp__file(os.path.join(dirpa ,name))
+      if st is not None: result[os.path.join(dirpa ,name)] = st
+  return result
+
+STAMP__INSTALL = stamp__install()
+
+def is__updated():
+  "whether Account-Tree was installed again since this router started"
+  return stamp__install() != STAMP__INSTALL
+
 def CLI(argv=None):
   if argv is None: argv = sys.argv[1:]
   if not argv or argv[0] in ("help" ,"-h" ,"--help"):
@@ -58,7 +81,7 @@ def CLI(argv=None):
     route = fetch()
     if route is None: return 1
     print(router.plan__of(route ,name).text()); return 0
-  router.Router(name ,fetch ,log).run()
+  router.Router(name ,fetch ,log ,is__updated).run()
   return 0
 
 if __name__ == "__main__":

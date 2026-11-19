@@ -30,6 +30,7 @@ import os ,time
 from pathlib import Path
 
 import Database
+import Notice
 import Storage
 import SameAccount
 import StoragePlug
@@ -185,5 +186,5 @@ def child__deallocate(name ,log ,preview):
       Sound.account__forget(t ,account)
     log.line("deallocated" ,name ,f"database uid {account['database_uid']} and system uid {row['system_uid']} retired")
     if login is not None:
-      Sound.router__reload(Sound.system_name__of(system_db ,storage_db.uuid() ,login) ,log ,preview)
+      Notice.notice__give(Sound.system_name__of(system_db ,storage_db.uuid() ,login) ,log ,preview)
     return True
