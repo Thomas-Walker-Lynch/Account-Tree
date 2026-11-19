@@ -59,6 +59,19 @@ def shell__of(entry):
   "the login shell of a system account, or SHELL__DEFAULT when it names none"
   return entry.pw_shell if entry.pw_shell and os.path.isabs(entry.pw_shell) else SHELL__DEFAULT
 
+def slice__of(entry):
+  """
+  The cgroup slice systemd keeps an account's sessions and services in,
+  user-<uid>.slice. A unit systemd-run starts is placed in system.slice
+  unless told otherwise, even with PAMName=login, where PAM registers a login
+  session for it; then the shell enter starts, or the window window_open
+  starts, would sit outside its account's slice, and what is done to the
+  account's processes through the slice, such as freezing them or ending
+  them at a logout, would miss it. systemd makes the slice when a unit names
+  it, if the account has none yet.
+  """
+  return f"user-{entry.pw_uid}.slice"
+
 def session__environment(display):
   """
   (the session type, tty, x11 or wayland ,the systemd-run --setenv
@@ -175,7 +188,7 @@ class LibraryInstruction:
                  ,'systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_SESSION_TYPE 2>/dev/null; exec "$0" -l'
                  ,shell]
     run(self._log ,["systemd-run" ,"--quiet" ,"--collect" ,f"--unit={unit}" ,"--service-type=exec"
-                    ,f"--uid={child.pw_uid}" ,f"--gid={child.pw_gid}"
+                    ,f"--uid={child.pw_uid}" ,f"--gid={child.pw_gid}" ,f"--slice={slice__of(child)}"
                     ,"--property=PAMName=login"
                     ,f"--property=TTYPath={fpa__slave}"
                     ,"--property=StandardInput=tty" ,"--property=StandardOutput=tty" ,"--property=StandardError=tty"
@@ -205,7 +218,7 @@ class LibraryInstruction:
                ,'systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_SESSION_TYPE 2>/dev/null; exec "$0" window .'
                ,FPA__ACCOUNT_TREE]
     run(self._log ,["systemd-run" ,"--quiet" ,"--collect" ,f"--unit={unit}" ,"--service-type=exec"
-                    ,f"--uid={child.pw_uid}" ,f"--gid={child.pw_gid}"
+                    ,f"--uid={child.pw_uid}" ,f"--gid={child.pw_gid}" ,f"--slice={slice__of(child)}"
                     ,"--property=PAMName=login"
                     ,"--property=StandardInput=null" ,"--property=StandardOutput=journal" ,"--property=StandardError=journal"
                     ,"--property=WorkingDirectory=~"
