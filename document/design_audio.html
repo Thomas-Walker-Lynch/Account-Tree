@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Account-Tree 5.0 Audio Design</title>
+    <script>
+      {
+        let dirpr_library = null;
+        try{ dirpr_library = localStorage.getItem("RT.dirpr_library"); }catch(e){}
+        window.RT = window.RT || {};
+        RT.dirpr_library = RT.dirpr_library || dirpr_library || "https://style.ReasoningTechnology.com/Manuscript";
+        document.write('<script src="' + RT.dirpr_library + '/Core/RT-Manuscript_make.js"><\/script>');
+      }
+    </script>
+    <script>
+      window.RT.theme_preference('inverse_wheat');
+      window.RT.load('Layout/paginate');
+      window.RT.load('Layout/article_tech_ref');
+      window.RT.load('Element/theme_selector');
+    </script>
+  </head>
+  <body>
+    <RT·theme-selector></RT·theme-selector>
+    <RT·article>
+      <RT·title
+        author="Thomas Walker Lynch"
+        date="2026-11-18"
+        title="Account-Tree 5.0 Audio Design">
+      </RT·title>
+
+      <RT·TOC level="1"></RT·TOC>
+
+      <h1>Purpose</h1>
+
+      <p>
+        This document describes how sound reaches the accounts of an account tree. It is a companion to <RT·code>design_Account-Tree.html</RT·code>, whose terms it uses, and it replaces that document's Lease section. The records, the requests and the commands are built; the router, which carries out the connection tables, and the window's Sound panel are not. The section State of the code says which is which, and To verify lists what is to be tried by hand on IdealX before the code that depends on it.
+      </p>
+
+      <p>
+        The aim: programs in several accounts play at the same time, and a voice call in one account hears the microphone, while no account can listen to another except where a person chose to let it, reach another through the sound system, or touch the sound device. The person decides, account by account and program by program, what goes where, and those decisions are kept with the storage, so they survive logout and come along when the storage is plugged into another system.
+      </p>
+
+      <h1>Term</h1>
+
+      <p>
+        Three words carry the three layers of control, and in this document, in the code and in the commands, each means this and nothing else carries its meaning:
+      </p>
+
+      <ul>
+        <li><RT·term>grant</RT·term>: a login account's grant of sound, which the system issues to it and revokes, kept in the system database. One grant covers the whole tree.</li>
+        <li><RT·term>permit</RT·term>: an account's permit for one end of one bus, or for one device, which an account above it issues to it and revokes, kept in the storage database. A permit held is in force, or not.</li>
+        <li><RT·term>connect</RT·term>: to join an endpoint to a bus end. A <RT·term>connection</RT·term> is a line of an account's connection table that does so, and takes effect only while the account holds the permits it needs in force.</li>
+      </ul>
+
+      <p>
+        Grant and permit are nouns and nothing else. In English both are verbs too, and "the account is granted" or "the stream is permitted" would read as an action of that word and blur the noun. So a grant or a permit is <em>issued</em>, <em>held</em> and <em>revoked</em>: the system issues a grant, a login account holds it, the system revokes it; an account issues a permit to a child account, the child holds it, the account revokes it. The verbs are shared, and the nouns say which layer is meant. The third layer has its own noun and verb already: a connection connects.
+      </p>
+
+      <p>
+        The other terms:
+      </p>
+
+      <ul>
+        <li><RT·term>hub</RT·term>: the login account at the top of a tree. Its PipeWire holds the sound devices, which logind gives to its session at the seat, and carries the tree's buses. The login account is for administering its child accounts; it plays and hears nothing by default.</li>
+        <li><RT·term>bus</RT·term>: a summing node in the hub, with a gather end and a broadcast end. What is connected to the gather end is added together, and everything connected to the broadcast end receives that sum. A tree has any number of buses, each numbered and named, made only from the login account's window.</li>
+        <li><RT·term>endpoint</RT·term>: what is connected to a bus end: the streams of a program, named by a pattern, or a device of the hub, named with <RT·code>@</RT·code>.</li>
+        <li><RT·term>device</RT·term>: the hub's output or input, as a PipeWire node. <RT·code>@output</RT·code> and <RT·code>@input</RT·code> are the output and input the login account has chosen in its ordinary sound settings, such as GNOME's, followed as the choice changes.</li>
+        <li><RT·term>connection table</RT·term>: an account's list of lines, each connecting an endpoint to a bus end.</li>
+        <li><RT·term>router</RT·term>: Account-Tree's program, running under each account that uses sound, which carries out that account's connection table.</li>
+        <li><RT·term>bit bucket</RT·term>: where a stream goes that no line connects: a null sink that discards what it is given, and a null source that gives silence.</li>
+      </ul>
+
+      <h1>Two layers</h1>
+
+      <p>
+        <em>Account to bus, enforced.</em> Whether an account reaches an end of a bus is decided by its permits and enforced by the kernel. For each bus end an account holds a permit in force for, there is a FIFO between that account and the hub, which only the two can open, and sound flows through it in one direction: from the account at a gather end, to the account at a broadcast end. A child account holds no descriptor to a sound device and is not a client of the hub's PipeWire, so it cannot list, record or reroute anything there.
+      </p>
+
+      <p>
+        <em>Program to bus, convenience.</em> Within an account, which of its own streams go to which of the bus ends it reaches is decided by its connection table, which names programs by pattern. A program chooses its own name, and a person who renames a media player <RT·code>firefox</RT·code> has it treated as Firefox; that is his choice, in his account. Each account's router connects only streams of its own account, and a line naming a bus end the account has no permit in force for has no effect.
+      </p>
+
+      <p>
+        Two consequences of the first layer guide every permit given. A permit on a broadcast end is permission to hear everything gathered onto that bus, from every branch of the tree. A permit on a gather end is permission to be heard by every account listening to that bus, which on the microphone bus means putting sound into another account's voice call.
+      </p>
+
+      <h1>Grant</h1>
+
+      <p>
+        The system issues grants to login accounts only, with <RT·code>Account-Tree_admin sound grant issue &lt;login account&gt;</RT·code>, and revokes one with <RT·code>sound grant revoke</RT·code>. A grant is the system's: a storage plugged into another system brings no grant with it. It brings everything else, its buses, its permits and every account's connection table, all kept in its storage database. On a system that has issued no grant to the login account the tree's sound configuration lies dormant; when the administrator issues one, the whole tree comes up for sound as it was configured. <RT·code>Account-Tree sound show</RT·code> and <RT·code>sound bus show</RT·code> print, first, whether the login account holds the grant.
+      </p>
+
+      <h1>Permit</h1>
+
+      <p>
+        There are two kinds of permit:
+      </p>
+
+      <ul>
+        <li>a <em>bus end permit</em>, for one end, gather or broadcast, of one bus: the account can connect endpoints to that end;</li>
+        <li>a <em>device permit</em>, for <RT·code>@output</RT·code> or <RT·code>@input</RT·code>: the account can connect that device to bus ends it holds bus end permits for.</li>
+      </ul>
+
+      <p>
+        The login account holds every permit by default, so that it can issue them down the tree. Every other account starts with none. A permit is issued to an account and revoked by its parent, or by any account above it acting through the window, which acts with the authority of the account it was first opened under; the person at the login account's window also revokes and issues the login account's own. An account that holds a permit, in force or not, issues and revokes the same permit for the accounts below it, so putting a child on a bus end issues it a permit it too can issue down.
+      </p>
+
+      <p>
+        A permit is in force when the account holds it and its parent holds the same permit in force, or, for the login account, when it holds the grant. Which permits are held is recorded; whether one is in force is worked out from the records each time, so nothing is written when a grant is issued or a permit above is revoked.
+      </p>
+
+      <h2>Three-state mark</h2>
+
+      <ul>
+        <li><em>blank</em>: not held;</li>
+        <li><em>gray</em>: held, not in force, because the permit above it is not in force, or because the login account holds no grant;</li>
+        <li><em>full</em>: held, and in force.</li>
+      </ul>
+
+      <p>
+        Clicking a blank mark issues the permit, which shows gray or full according to what is above it. Clicking a gray or full mark revokes it, to blank. Without the grant every mark in the tree toggles between blank and gray. When a permit above is revoked, the marks below it turn gray and the permits stay held, and they turn full again when it is issued again. When the grant is issued, every gray mark whose chain reaches the login account turns full.
+      </p>
+
+      <h1>Bus</h1>
+
+      <p>
+        A bus has a number and a name, and nothing else: what it gathers and where its sum goes are lines in connection tables. Only the login account's window makes, renames and removes buses. A bus the login account makes comes with the login account's permits for both its ends. A bus with nothing connected to either end is valid; a new bus starts that way. What is gathered onto a bus with nothing at its broadcast end is heard by nothing. What is gathered onto a bus is summed on that bus alone, so several buses give several separate sums at the same time, and a bus with no device on it carries sound between accounts and nowhere else, which is how a person sets up a channel between accounts on purpose.
+      </p>
+
+      <p>
+        Removing a bus is refused while any account's connection table names it; the refusal lists those accounts. The bus end permits for it are deleted with it.
+      </p>
+
+      <h2>Default</h2>
+
+      <p>
+        The first time sound is configured for a tree, which is when the first permit in it is issued, the default buses are made:
+      </p>
+
+      <RT·code>
+        1   system sound
+        2   system microphone
+      </RT·code>
+
+      <p>
+        The defaults are in the code. Once copied into a storage database, that database's own rows are the authority, and a later change to the defaults in the code does not reach them.
+      </p>
+
+      <h1>Connection table</h1>
+
+      <p>
+        Every account that holds a permit, gray or full, has a connection table, edited in its window and kept in the storage database. The table is made from the default lines the first time a permit is issued to the account, and is kept for that account from then on, permits or not; a Reset to default button puts the default lines back. Each line takes effect only while the account holds full permits for it.
+      </p>
+
+      <p>
+        For now the table is text, one line to a connection, in order:
+      </p>
+
+      <RT·code>
+        &lt;end&gt;  &lt;bus&gt;  &lt;endpoint&gt;
+      </RT·code>
+
+      <p>
+        The end is <RT·code>gather</RT·code> or <RT·code>broadcast</RT·code>. The bus is its number or its name, a name with a space written in double quotes. The endpoint is a device, <RT·code>@output</RT·code> or <RT·code>@input</RT·code>, or a pattern: a regular expression matched in full against the program's name, the file name of its executable, which PipeWire gives as <RT·code>application.process.binary</RT·code>. A blank line, or a line beginning with <RT·code>#</RT·code>, is ignored.
+      </p>
+
+      <p>
+        The login account's table holds device lines only, since its own programs are not to use sound. Its default:
+      </p>
+
+      <RT·code>
+        broadcast  "system sound"       @output
+        gather     "system microphone"  @input
+      </RT·code>
+
+      <p>
+        Every other account's default:
+      </p>
+
+      <RT·code>
+        # every program that plays is heard on system sound
+        gather     "system sound"       .*
+        # these programs hear the microphone
+        broadcast  "system microphone"  firefox|chromium|chrome|zoom
+      </RT·code>
+
+      <h2>Program line</h2>
+
+      <p>
+        A stream that plays is matched against the table's <RT·code>gather</RT·code> program lines, and a stream that captures against its <RT·code>broadcast</RT·code> program lines. The first line, from the top, whose pattern matches and whose bus end the account holds a full permit for, connects the stream. A stream no line connects goes to the bit bucket.
+      </p>
+
+      <p>
+        Lines name programs, not process ids, so a table holds across logouts and restarts: the person wires an account once, and every new stream of a matching program is connected the same way, in every later session and on every system the storage is plugged into.
+      </p>
+
+      <h2>Device line</h2>
+
+      <p>
+        A device line needs the device permit for its device and the bus end permit for its bus end, both full. A device connection is a fact about the hub, the pair of device and bus end: the hub makes one link for each distinct pair named by a device line in force, in any account's table, and keeps it while at least one such line names it. The same line in two tables is one connection. One device on several bus ends is several links, since PipeWire gives one source to as many links as it has.
+      </p>
+
+      <p>
+        A device permit is a strong permit. An account holding <RT·code>@input</RT·code> and a gather permit on some bus sends the room's sound to every account listening to that bus.
+      </p>
+
+      <h1>How sound moves</h1>
+
+      <h2>In the hub</h2>
+
+      <p>
+        Each bus is a null sink in the hub's PipeWire, <RT·code>support.null-audio-sink</RT·code>, which adds together whatever is linked into it and gives the sum on its monitor. The bus nodes are kept out of the hub's defaults, so that none is ever the chosen output or input; were one chosen, its own broadcast end would feed it. A device line in force is a link the hub's router makes: <RT·code>@output</RT·code> on a broadcast end is a loopback from the bus's monitor to the chosen output, and <RT·code>@input</RT·code> on a gather end a loopback from the chosen input into the bus. Each follows the login account's choice as it changes.
+      </p>
+
+      <h2>Between the hub and an account</h2>
+
+      <p>
+        For each bus end an account other than the login account holds a full permit for, the request interpreter makes a FIFO, <RT·code>/run/Account-Tree/bus/&lt;account&gt;/&lt;bus number&gt;.&lt;end&gt;</RT·code>, writable by the account and readable by the login account for a gather end, the other way for a broadcast end. The FIFO is owned by the account, with the group root and no group access, and the login account's access is an ACL entry; a share makes another account a member of the login account's own group, and such an account cannot open it. The directories down to it are root's, mode 0711, so an account passes through to its FIFO by name and lists nothing. A FIFO whose owner or ACL entry no longer matches the accounts' system uids, as after a storage is plugged in again, is made again. Each end of a FIFO is a PipeWire pipe-tunnel, with the format fixed at both ends, 16-bit stereo at 48 kHz, so the reader interprets the bytes by its own configuration and the writer has nothing to negotiate:
+      </p>
+
+      <ul>
+        <li>gather: in the account, a sink named for the bus, whose samples are written to the FIFO; in the hub, a stream that reads the FIFO and plays into the bus;</li>
+        <li>broadcast: in the hub, a stream that captures the bus's monitor and writes the FIFO; in the account, a source named for the bus, whose samples are read from the FIFO.</li>
+      </ul>
+
+      <p>
+        Each such stream in the hub carries the account's name, so the hub's mixer shows every account on every bus as its own stream, with its own level and mute. Disconnecting one leaves the others alone, and nothing on one account's FIFO reaches another account.
+      </p>
+
+      <h2>Router</h2>
+
+      <p>
+        The router runs as a user unit, <RT·code>Account-Tree_router.service</RT·code>, under each account that holds a full permit, the login account included. At start, and each time it is told to reload, it gives a request to the request gate, <RT·code>sound_route_show</RT·code>, and is answered with its account's connection table and, for each bus end the account holds a full permit for, the FIFO to use; the hub's router is answered with the hub's side of every FIFO of the tree, and with the device connections in force. Communication across the privilege boundary goes through the gate; the FIFOs are files because they are the sound channels themselves, and their permissions are the enforcement.
+      </p>
+
+      <p>
+        With its answer, the router writes the PipeWire configuration for each tunnel in its own account's runtime directory, and runs each tunnel as a process of its own, <RT·code>pipewire -c &lt;conf&gt;</RT·code>, so no account's PipeWire is restarted to connect or disconnect. It watches its account's PipeWire for new streams, matches each against the table, and sets the stream's target, as a patch tool does when a person moves a stream by hand. The streams Account-Tree makes carry a property marking them, and the router leaves them alone.
+      </p>
+
+      <p>
+        The request interpreter, after any change, tells each affected router to reload, with <RT·code>systemctl --user --machine=&lt;account&gt;@ reload Account-Tree_router.service</RT·code>. The signal carries no data; the router asks again.
+      </p>
+
+      <h2>Bit bucket</h2>
+
+      <p>
+        In a child account the bit bucket's two null nodes are the default output and input, and with the bus sinks and sources they are the only audio devices the account has, since it has no access to <RT·code>/dev/snd</RT·code>. Its sound settings show the bus ends it reaches by the buses' names, and a person in that account can move a stream among them with the ordinary tools. A stream that appears before the router has seen it is never heard and hears nothing.
+      </p>
+
+      <p>
+        The hub cannot do the same: its default output and input have to stay the devices the person chose, since that choice is what <RT·code>@output</RT·code> and <RT·code>@input</RT·code> mean. Its router sends every stream of the login account's own programs to the bit bucket, and such a stream reaches the chosen device for the moment before the router moves it.
+      </p>
+
+      <h2>Session</h2>
+
+      <p>
+        The hub's PipeWire runs while the login account has its session at the seat, which is how an account tree is used: the person logs in to the login account and enters the child accounts from it. A child account's router starts with its systemd <RT·code>--user</RT·code> instance, at <RT·code>enter</RT·code>. Two trees with sessions on one seat each have a hub, and only the hub of the seat's active session reaches the devices.
+      </p>
+
+      <h1>Record</h1>
+
+      <p>
+        In the system database:
+      </p>
+
+      <ul>
+        <li><RT·code>resource_grant</RT·code>: the resource, for now always <RT·code>sound</RT·code>; the system account's name of the login account; when the grant was issued. The table was first named <RT·code>resource_allowance</RT·code>; that table stays defined in the schema, empty and unread, because records written before the rename write into it and the record's replay runs them.</li>
+      </ul>
+
+      <p>
+        In the storage database:
+      </p>
+
+      <ul>
+        <li><RT·code>sound_bus</RT·code>: the login account's database uid, the bus's number and name, and when it was made.</li>
+        <li><RT·code>sound_permit_bus_end</RT·code>: one row for each bus end permit an account holds: the account's database uid, the bus number, the end, and when it was issued, in the column <RT·code>made</RT·code>.</li>
+        <li><RT·code>sound_permit_device</RT·code>: one row for each device permit an account holds: the account's database uid, the device, and when it was issued, in the column <RT·code>made</RT·code>.</li>
+        <li><RT·code>sound_connection</RT·code>: the lines of each account's connection table: the account's database uid, the line number, the end, the bus number, the kind of endpoint, <RT·code>program</RT·code>, <RT·code>device</RT·code> or <RT·code>comment</RT·code>, and the pattern, the device or the comment's text.</li>
+      </ul>
+
+      <p>
+        A revoked permit has no row. Whether a permit is in force is worked out from these rows and the grant. Deallocation deletes an account's rows. The tables are written for sound alone; the pattern of a grant to the login account, permits down the tree and connections by table fits other resources too, and once a second resource shows what they have in common, the tables and the code are to be made general.
+      </p>
+
+      <h1>Request and command</h1>
+
+      <ul>
+        <li><RT·code>sound_show</RT·code>(account_name, &gt;sound): the tree's buses with the accounts holding each end; the marks of the permits of the account and of its child accounts; the account's connection table. The window reads this.</li>
+        <li><RT·code>sound_permit_issue</RT·code>(account_name, permit) and <RT·code>sound_permit_revoke</RT·code>(account_name, permit), where the permit is a bus end, as <RT·code>1.gather</RT·code>, or a device: issue it to the account, or revoke it. Accepted when the asking account is the login account, or holds that permit, in force or not, and the account named is below it.</li>
+        <li><RT·code>sound_connection_set</RT·code>(account_name, text) and <RT·code>sound_connection_reset</RT·code>(account_name): replace an account's table, or put the default lines back. Accepted for the account itself or an account above it, while the account has a table. A program line in the login account's table is refused.</li>
+        <li><RT·code>sound_bus_set</RT·code>(bus, name) and <RT·code>sound_bus_remove</RT·code>(bus): make or rename a bus, or remove it. Accepted for the login account alone.</li>
+        <li><RT·code>sound_route_show</RT·code>(&gt;route): what the asking account's router needs, as described under Router.</li>
+      </ul>
+
+      <p>
+        The commands put the verb before the account, so that a child account named <RT·code>bus</RT·code> cannot be taken for the word:
+      </p>
+
+      <RT·code>
+        Account-Tree sound show &lt;account&gt;
+        Account-Tree sound permit issue|revoke &lt;account&gt; &lt;bus&gt; gather|broadcast
+        Account-Tree sound permit issue|revoke &lt;account&gt; @output|@input
+        Account-Tree sound connection show &lt;account&gt;
+        Account-Tree sound connection set &lt;account&gt; &lt;file&gt;
+        Account-Tree sound connection reset &lt;account&gt;
+        Account-Tree sound bus show
+        Account-Tree sound bus set &lt;bus&gt; &lt;name&gt;
+        Account-Tree sound bus remove &lt;bus&gt;
+        Account-Tree_admin sound grant issue|revoke &lt;login account&gt;
+        Account-Tree_admin sound grant show
+      </RT·code>
+
+      <h1>Window</h1>
+
+      <p>
+        The window's Sound panel has three parts:
+      </p>
+
+      <ul>
+        <li><em>Bus</em>: the tree's buses, numbered, with their names, and for each end the accounts holding a permit for it. Editable in the login account's window alone.</li>
+        <li><em>Permit</em>: a row for the window account and one for each of its child accounts; a column for each end of each bus and one for each device, holding the three-state marks. The window account's own marks change only from an account above it, except the login account's.</li>
+        <li><em>Connection</em>: the window account's connection table, as text, with Save and Reset to default. Lines without full permits are shown dimmed.</li>
+      </ul>
+
+      <p>
+        Opening a child account's window from this one gives the same panel one generation lower, acting with the authority of the account the first window was opened under.
+      </p>
+
+      <h1>Life cycle</h1>
+
+      <ul>
+        <li><em>Grant issued</em>: the hub's router is told to reload, and makes the buses and the device connections; every router in the tree with a full permit then connects.</li>
+        <li><em>Grant revoked</em>: every router in the tree is told to reload, and disconnects; the records stay.</li>
+        <li><em>Permit issued or revoked, table saved</em>: the FIFOs are made or deleted, and the routers of the account, of the accounts below it whose marks change, and of the hub, are told to reload.</li>
+        <li><em>Enter</em>: the account's systemd <RT·code>--user</RT·code> instance starts its router.</li>
+        <li><em>Unplug</em>: the tree's FIFOs are deleted before the system accounts are, so no FIFO outlives the uid it was made for; the routers end with the other processes.</li>
+        <li><em>Deallocate</em>: the account's FIFOs and rows are deleted, and the hub's router is told to reload.</li>
+      </ul>
+
+      <h1>State of the code</h1>
+
+      <ul>
+        <li><em>Built</em>: the records, in the system database and the storage database; <RT·code>Sound.py</RT·code>, the permits and their marks, the connection tables, the buses, and making and deleting the FIFOs; the requests, with their checks in the request guard; the <RT·code>Account-Tree sound</RT·code> and <RT·code>Account-Tree_admin sound</RT·code> commands; the FIFOs made again at attach, and deleted at unplug and deallocation. Tested on a machine with no systemd and no sound.</li>
+        <li><em>Not yet built</em>: the router and its user unit, and with them everything under How sound moves that happens in PipeWire: the bus nodes, the device loopbacks, the tunnels and the bit bucket. A change tells the routers concerned to reload; with no router running, nothing happens.</li>
+        <li><em>Not yet built</em>: the window's Sound panel, which waits for the window to move onto <RT·code>Request·Composer</RT·code>.</li>
+      </ul>
+
+      <h1>To verify</h1>
+
+      <p>
+        By hand on IdealX, before the code that depends on each:
+      </p>
+
+      <ol>
+        <li>The pipe-tunnel: a FIFO written by a child account's sink and read by a playback stream in the login account plays; two children at once mix; the login account's mixer shows each as its own stream.</li>
+        <li>The latency through the FIFO, and whether a video's sound keeps to its picture. A pipe holds 64 KiB by default, about a third of a second at 16-bit stereo 48 kHz.</li>
+        <li><RT·code>pipewire -c &lt;conf&gt;</RT·code>, run as a process of its own, makes the tunnel in the account's running PipeWire, and ending it removes the tunnel.</li>
+        <li>A null sink can be kept out of the outputs and inputs GNOME's sound settings offer.</li>
+        <li>Setting a stream's target from outside, as the router does, moves a stream already playing.</li>
+        <li>A bus with streams gathered onto it and nothing at its broadcast end runs, clocked by PipeWire's dummy driver, rather than stalling the streams.</li>
+        <li>A child account's WirePlumber, with no access to <RT·code>/dev/snd</RT·code>, starts without complaint, or is told not to look for devices.</li>
+      </ol>
+
+      <h1>Later feature</h1>
+
+      <ul>
+        <li><RT·code>@node &lt;node name&gt;</RT·code>, naming one particular device, so that two outputs or two inputs serve different buses at once; with it, an error on a bus whose arrangement the hardware does not support.</li>
+        <li>A warning before saving a table that makes a loop: a program listening to a bus and playing onto a bus whose sum reaches back to the first.</li>
+        <li>Mix-minus: giving an account's broadcast connection the sum of its bus without that account's own contribution.</li>
+        <li>Patterns matched against other stream properties, such as <RT·code>application.name</RT·code> or <RT·code>media.role</RT·code>.</li>
+        <li>A graphical editor for the connection table, in place of the text.</li>
+      </ul>
+
+    </RT·article>
+  </body>
+</html>

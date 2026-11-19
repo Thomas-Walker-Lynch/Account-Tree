@@ -17,15 +17,86 @@ the account tree's records whether this account can have it done.
 
 Usage: Account-Tree <command> [argument ...]
   help | -h | --help   print this message (also printed when given no arguments)
-  window [<account>]   open the resource window for <account>, default your own
-  list [<account>]     print the child accounts of <account>, default your own
+  window <account>     open the resource window for <account>
+  list <account>       print the child accounts of <account>
   resource             print the kinds of resource, and which have an allocator
-  enter <account>      start a login shell of <account>, an account below yours,
-                       in this terminal; the shell, and every program started
+  current              print the current account, the one this program runs
+                       under, absolutely, as ·Thomas·developer; a script opens
+                       the window for it with
+                         Account-Tree window "$(Account-Tree current)"
+  enter <account>      start a login shell of <account>, an account below this
+                       one, in this terminal; the shell, and every program started
                        from it, runs under <account>, and can open windows on
-                       your display. <account> is its full name, or the part
-                       after your own name and the '·', as developer for
-                       Thomas·developer. The session ends when its shell does
+                       your display. The session ends when its shell does
+  account make child <account>
+                       make <account>, below this one or below an account below
+                       it. Up to 100 accounts can be below an account, unless
+                       the administrator sets another limit with
+                       Account-Tree_admin limit set
+  account deallocate <account> [confirmed]
+                       remove <account>, an account below this one with none
+                       below it: its processes are ended, its system account
+                       goes, and its home is moved aside on its storage, for
+                       the administrator to remove. Without confirmed, you are
+                       asked to type its full name
+  share <account> with <account> ...
+                       share the first account's files with each account after
+                       with: each becomes a member of the first account's own
+                       group, and reaches what it gives its group. The shares
+                       are kept on the storage, so they hold on every system
+                       it is plugged into. Every account named is this one or
+                       one below it, all on one storage
+  share <account> remove <account> ...
+                       end those shares
+  share <account> list
+                       print the accounts the account is shared with here
+  sound show <account>
+                       print the sound of <account>: its tree's buses and who
+                       holds a permit for each end, the marks of the permits of
+                       <account> and its child accounts, and its connection
+                       table. A mark is full, set and in force; gray, set and
+                       not in force; or blank, not set
+  sound permit <account> <bus> gather|broadcast on|off
+  sound permit <account> @output|@input on|off
+                       set or clear a permit of <account>: for an end of a bus,
+                       named by number or name, or for a device of the hub. The
+                       tree's login account sets every permit; another account
+                       sets the permits it holds for the accounts below it
+  sound connection show <account>
+                       print the connection table of <account>
+  sound connection set <account> <file>
+                       replace the connection table of <account> with the lines
+                       of <file>, - for standard input. A line is
+                         gather|broadcast  <bus>  <endpoint>
+                       the bus a number or a name, in double quotes when it has
+                       a space; the endpoint @output, @input, or a regular
+                       expression matched against a program's name. A line
+                       beginning with # is a comment
+  sound connection reset <account>
+                       put back the default connection table of <account>
+  sound bus show       print the buses of this account's tree
+  sound bus set <number> <name>
+                       make or rename a bus; for the login account
+  sound bus remove <bus>
+                       remove a bus no connection table names; for the login
+                       account
+
+An <account> is named relative to the current account, the one this program
+runs under, or, with a leading '·', absolutely, from root. Run under Thomas:
+
+  developer                 Thomas·developer
+  developer·build           Thomas·developer·build
+  Thomas                    Thomas·Thomas, a child named Thomas
+  ·Thomas                   Thomas
+  ·Thomas·developer         Thomas·developer
+  ·                         root
+
+Run under Thomas·developer, as in a shell entered with enter developer, build
+is Thomas·developer·build. No account name begins with '·', so each name has
+one reading. A name ending in '·' is refused. A command that takes an account
+requires it: none has a default, so no word is taken for an account it was not.
+The commands that change the tree, through the request gate, can name any
+account; the gate decides from the records which this account can change.
 """
 
 import sys ,os
@@ -39,15 +110,27 @@ def print_help():
   print(__doc__.strip())
   return 0
 
-def account_argument(rest ,command):
-  if len(rest) > 1:
-    print(f"Error: {command} is given at most one account name." ,file=sys.stderr)
+def account_name(text):
+  """
+  The absolute name of the account text names, read from the acting account;
+  see AccountTree.account_name__expand. Prints why and returns None when it
+  names none.
+  """
+  try:
+    return AccountTree.account_name__expand(AccountTree.acting_account().name ,text)
+  except ValueError as error:
+    print(f"Error: {error}." ,file=sys.stderr)
     return None
-  if not rest:
-    return AccountTree.acting_account()
-  entry = AccountTree.account(rest[0])
+
+def account_argument(rest ,command):
+  if len(rest) != 1:
+    print(f"Error: {command} is given one account name." ,file=sys.stderr)
+    return None
+  name = account_name(rest[0])
+  if name is None: return None
+  entry = AccountTree.account(name)
   if entry is None:
-    print(f"Error: there is no system account named '{rest[0]}'." ,file=sys.stderr)
+    print(f"Error: there is no system account named '{name}'." ,file=sys.stderr)
   return entry
 
 def command__window(rest):
@@ -63,6 +146,13 @@ def command__list(rest):
     print(f"{child.name:<28}{child.uid:>7}  {child.home}")
   return 0
 
+def command__current(rest):
+  if rest:
+    print("Error: current is given no arguments." ,file=sys.stderr)
+    return 1
+  print(AccountTree.account_name__specifier(AccountTree.acting_account().name))
+  return 0
+
 def command__resource(rest):
   if rest:
     print("Error: resource is given no arguments." ,file=sys.stderr)
@@ -74,22 +164,14 @@ def command__resource(rest):
       print(f"  {kind.name:<20}{state:<13}{kind.description}")
   return 0
 
-def account_name__below(text):
-  "the full name of an account named by its full name or by the part below the acting account"
-  if AccountTree.SEPARATOR in text:
-    return text
-  return AccountTree.child_account__name(AccountTree.acting_account().name ,text)
-
 def command__enter(rest):
   if len(rest) != 1:
     print("Error: enter is given one account name." ,file=sys.stderr)
     return 1
   import Request·Composer as composer
   import Terminal
-  try:
-    name = account_name__below(rest[0])
-  except ValueError as error:
-    print(f"Error: {error}" ,file=sys.stderr)
+  name = account_name(rest[0])
+  if name is None:
     return 1
   try:
     fd__master = composer.enter(name)
@@ -104,11 +186,244 @@ def command__enter(rest):
     os.close(fd__master)
   return 0
 
+def is__confirmed(name ,rest ,what):
+  """
+  Whether the person confirms what is to be done to name: the word confirmed
+  given, or the name typed in answer.
+  """
+  if rest == ["confirmed"]:
+    return True
+  if rest:
+    print(f"Error: after the account name only the word confirmed is taken, not {' '.join(rest)!r}." ,file=sys.stderr)
+    return False
+  if not sys.stdin.isatty():
+    print(f"Error: {what} {name} cannot be confirmed with no terminal; give the word confirmed." ,file=sys.stderr)
+    return False
+  try:
+    answer = input(f"{what} {name}? Type its full name to confirm: ")
+  except EOFError:
+    answer = ""
+  if answer.strip() != name:
+    print("Not confirmed; nothing was done." ,file=sys.stderr)
+    return False
+  return True
+
+def report(output):
+  import Request·Composer as composer
+  for line in composer.list__done(output):
+    print(f"  {line}")
+
+def command__account(rest):
+  import Request·Composer as composer
+  if not rest:
+    print("Error: account is given make or deallocate." ,file=sys.stderr)
+    return 1
+  word ,rest = rest[0] ,rest[1:]
+  try:
+    if word == "make":
+      if len(rest) != 2 or rest[0] != "child":
+        print("Error: account make is given child and an account name: account make child <account>." ,file=sys.stderr); return 1
+      try:
+        name = AccountTree.account_name__expand(AccountTree.acting_account().name ,rest[1] ,is__existing=False)
+      except ValueError as error:
+        print(f"Error: {error}." ,file=sys.stderr); return 1
+      made ,output = composer.make_child_account(name)
+      report(output)
+      print(f"made {made['name']}  system uid {made['system_uid']}  database uid {made['database_uid']}")
+      return 0
+    if word == "deallocate":
+      if not rest:
+        print(f"Error: account {word} is given an account name." ,file=sys.stderr); return 1
+      name = account_name(rest[0])
+      if name is None:
+        return 1
+      if not is__confirmed(name ,rest[1:] ,word.capitalize()):
+        return 1
+      output = composer.deallocate(name)
+      report(output)
+      print(f"{word}d {name}")
+      return 0
+  except ValueError as error:
+    print(f"Error: {error}" ,file=sys.stderr); return 1
+  except composer.RequestError as error:
+    if error.output:
+      print(error.output.rstrip() ,file=sys.stderr)
+    print(f"Error: {error}" ,file=sys.stderr)
+    return 1
+  print(f"Error: account is given make or deallocate, not {word!r}." ,file=sys.stderr)
+  return 1
+
+def command__share(rest):
+  import Request·Composer as composer
+  if len(rest) < 2 or rest[1] not in ("with" ,"remove" ,"list"):
+    print("Error: share is given an account, then with, remove or list: share <account> with <account> ..." ,file=sys.stderr)
+    return 1
+  name = account_name(rest[0])
+  if name is None: return 1
+  word ,list__text = rest[1] ,rest[2:]
+  if word == "list":
+    if list__text:
+      print("Error: share <account> list is given nothing after list." ,file=sys.stderr); return 1
+    import SystemAccount
+    group = SystemAccount.system_group(name)
+    for member in sorted(group.gr_mem if group else []):
+      print(member)
+    return 0
+  if not list__text:
+    print(f"Error: share {rest[0]} {word} is given the accounts to share with." ,file=sys.stderr); return 1
+  list__member = []
+  for text in list__text:
+    member = account_name(text)
+    if member is None: return 1
+    list__member.append(member)
+  try:
+    output = (composer.share_with if word == "with" else composer.share_remove)(name ,list__member)
+  except composer.RequestError as error:
+    if error.output:
+      print(error.output.rstrip() ,file=sys.stderr)
+    print(f"Error: {error}" ,file=sys.stderr)
+    return 1
+  report(output)
+  return 0
+
+# --------------------------------------------------------------------------------
+# sound
+
+def request_error(error):
+  if error.output:
+    print(error.output.rstrip() ,file=sys.stderr)
+  print(f"Error: {error}" ,file=sys.stderr)
+  return 1
+
+def sound__print_bus(sound):
+  print("bus")
+  for bus in sound["list__bus"]:
+    print(f"  {bus['number']:>3}  {bus['name']:<24}gather: {', '.join(bus['list__gather']) or '-'}"
+          f"    broadcast: {', '.join(bus['list__broadcast']) or '-'}")
+  print("device")
+  for device in sound["list__device"]:
+    print(f"  {device['device']:<29}{', '.join(device['list__holder']) or '-'}")
+
+def sound__print(sound ,name):
+  "print what sound show prints, from the value sound_show returns"
+  allowance = "given" if sound["is__allowance"] else f"not given; the administrator gives it with Account-Tree_admin sound allow {sound['login']}"
+  print(f"tree of {sound['login']}: sound {allowance}")
+  if not sound["is__configured"]:
+    print("  sound is not configured for the tree yet; the default buses below are made when its first permit is set")
+  sound__print_bus(sound)
+  list__permit = [m["permit"] for m in sound["list__row"][0]["list__mark"]]
+  width = max(len(r["name"]) for r in sound["list__row"]) + 2
+  print("permit")
+  print("  " + " " * width + "".join(f"{p:<13}" for p in list__permit))
+  for r in sound["list__row"]:
+    print(f"  {r['name']:<{width}}" + "".join(f"{m['mark']:<13}" for m in r["list__mark"]))
+  sound__print_connection(sound ,name)
+
+def sound__print_connection(sound ,name):
+  if not sound["has__table"]:
+    print(f"{name} has no connection table; it is made when its first permit is set")
+    return
+  print(f"connection table of {name}")
+  for line in sound["connection"].splitlines():
+    print(f"  {line}")
+
+def bus__number(sound ,text):
+  "the number of the bus text names, by number or name, or None"
+  for bus in sound["list__bus"]:
+    if (text.isdigit() and bus["number"] == int(text)) or bus["name"] == text:
+      return bus["number"]
+  return None
+
+def command__sound(rest):
+  import Request·Composer as composer
+  if not rest or rest[0] not in ("show" ,"permit" ,"connection" ,"bus"):
+    print("Error: sound is given show, permit, connection or bus; run Account-Tree for the forms." ,file=sys.stderr)
+    return 1
+  word ,rest = rest[0] ,rest[1:]
+  current = AccountTree.acting_account().name
+  try:
+    if word == "show":
+      if len(rest) != 1:
+        print("Error: sound show is given one account." ,file=sys.stderr); return 1
+      name = account_name(rest[0])
+      if name is None: return 1
+      sound__print(composer.sound_show(name) ,name)
+      return 0
+    if word == "permit":
+      if len(rest) not in (3 ,4) or rest[-1] not in ("on" ,"off"):
+        print("Error: sound permit is given <account> <bus> gather|broadcast on|off, or <account> @output|@input on|off." ,file=sys.stderr)
+        return 1
+      name = account_name(rest[0])
+      if name is None: return 1
+      if len(rest) == 3:
+        permit = rest[1]
+        if not permit.startswith("@"):
+          print("Error: a device is @output or @input; a bus end is given as <bus> gather|broadcast." ,file=sys.stderr); return 1
+      else:
+        if rest[2] not in ("gather" ,"broadcast"):
+          print(f"Error: an end is gather or broadcast, not {rest[2]!r}." ,file=sys.stderr); return 1
+        number = bus__number(composer.sound_show(name) ,rest[1])
+        if number is None:
+          print(f"Error: the tree has no bus {rest[1]!r}." ,file=sys.stderr); return 1
+        permit = f"{number}.{rest[2]}"
+      report(composer.sound_permit_set(name ,permit ,rest[-1] == "on"))
+      return 0
+    if word == "connection":
+      if len(rest) < 2 or rest[0] not in ("show" ,"set" ,"reset"):
+        print("Error: sound connection is given show, set or reset, and an account." ,file=sys.stderr); return 1
+      verb ,name = rest[0] ,account_name(rest[1])
+      if name is None: return 1
+      if verb == "show":
+        if len(rest) != 2:
+          print("Error: sound connection show is given one account." ,file=sys.stderr); return 1
+        sound__print_connection(composer.sound_show(name) ,name)
+        return 0
+      if verb == "reset":
+        if len(rest) != 2:
+          print("Error: sound connection reset is given one account." ,file=sys.stderr); return 1
+        report(composer.sound_connection_set(name ,None))
+        return 0
+      if len(rest) != 3:
+        print("Error: sound connection set is given an account and a file, - for standard input." ,file=sys.stderr); return 1
+      try:
+        text = sys.stdin.read() if rest[2] == "-" else open(rest[2] ,encoding="utf-8").read()
+      except OSError as error:
+        print(f"Error: {rest[2]}: {error.strerror}." ,file=sys.stderr); return 1
+      report(composer.sound_connection_set(name ,text))
+      return 0
+    # bus
+    if not rest or rest[0] not in ("show" ,"set" ,"remove"):
+      print("Error: sound bus is given show, set or remove." ,file=sys.stderr); return 1
+    verb ,rest = rest[0] ,rest[1:]
+    if verb == "show":
+      if rest:
+        print("Error: sound bus show is given nothing more." ,file=sys.stderr); return 1
+      sound__print_bus(composer.sound_show(current))
+      return 0
+    if verb == "set":
+      if len(rest) != 2 or not rest[0].isdigit():
+        print("Error: sound bus set is given a number and a name, the name in quotes when it has a space." ,file=sys.stderr); return 1
+      report(composer.sound_bus_set(int(rest[0]) ,rest[1]))
+      return 0
+    if len(rest) != 1:
+      print("Error: sound bus remove is given one bus, by number or name." ,file=sys.stderr); return 1
+    number = bus__number(composer.sound_show(current) ,rest[0])
+    if number is None:
+      print(f"Error: the tree has no bus {rest[0]!r}." ,file=sys.stderr); return 1
+    report(composer.sound_bus_remove(number))
+    return 0
+  except composer.RequestError as error:
+    return request_error(error)
+
 COMMAND = {
   "window": command__window,
   "list": command__list,
   "resource": command__resource,
   "enter": command__enter,
+  "current": command__current,
+  "account": command__account,
+  "share": command__share,
+  "sound": command__sound,
 }
 
 def CLI(argv=None):

@@ -83,7 +83,8 @@ CREATE TABLE storage_head__seen (
 );
 
 -- How many child accounts each system account may have below it. A system
--- account with no row may have none. It is kept by name, because the system
+-- account with no row may have LIMIT__DEFAULT, 100, set in System.py. It is
+-- kept by name, because the system
 -- uid of an account Account-Tree made changes each time its storage is plugged in.
 CREATE TABLE account_limit (
   system_account__name  TEXT PRIMARY KEY,
@@ -137,6 +138,16 @@ CREATE TABLE IF NOT EXISTS system_account__saved_group (
   database_uid   INTEGER NOT NULL,
   group_name     TEXT NOT NULL,
   PRIMARY KEY (database_uuid ,database_uid ,group_name)
+);
+
+-- The resources the system gives to login accounts, a row for each given:
+-- for now the resource is sound. Kept here, the system's own, so a storage
+-- plugged into another system brings none with it.
+CREATE TABLE IF NOT EXISTS resource_allowance (
+  resource              TEXT NOT NULL,
+  system_account__name  TEXT NOT NULL,
+  given                 TEXT NOT NULL,
+  PRIMARY KEY (resource ,system_account__name)
 );
 
 -- Every change. hash covers previous_hash, series, description, change and nonce.

@@ -73,6 +73,13 @@ Commands:
                                  account, so that attach mounts its home. Without it, the
                                  storage account is used on no system until
                                  is-same-account names a system account for it
+  account deallocate <system account>
+                                 remove a child account: end its processes, unmount its
+                                 home, delete its system account and the files it left
+                                 on this system, retire its uids, and move its home to
+                                 home/Account-Tree/account-deallocated/<name>.<time> on
+                                 its storage, which only the administrator removes.
+                                 Refused while an account below it remains
   attach <dirp_storage> [branch]
                                  make again, with the next free system uids, the system
                                  accounts storage unplug deleted; then mount the home of
@@ -97,8 +104,24 @@ Commands:
                                  makes it, with a new system uid, when it does not
   limit set <system account> <maximum>
                                  set how many child accounts a system account may have
-                                 below it; one with no limit set may have none
+                                 below it; one with no limit set may have 100
   preview <command>              print the log of what <command> would do, change nothing
+  share record <dirp_storage>    record in the storage database the shares this system
+                                 has among the storage's accounts: each membership of one
+                                 in the own group of another, as Thomas·developer in the
+                                 group Thomas·incommon. The storage database is the
+                                 authority for shares, and attach makes them on any
+                                 system; a share kept only as a group membership, made
+                                 before the storage database kept shares, is not made
+                                 again after an unplug. Run it once, while the storage is
+                                 attached
+  sound allow <login account>    give the login account sound: it, and the accounts
+                                 below it it gives permits to, reach the buses of its
+                                 tree. The allowance is this system's; a storage
+                                 plugged into another system brings none with it
+  sound deny <login account>     take the allowance of sound back; the tree's buses,
+                                 permits and connection tables stay, dormant
+  sound show                     print the login accounts this system gives sound
   same-account show [storage <dirp_storage>]
                                  print which accounts are the same account here
   same-account suggest storage <dirp_storage>
@@ -179,13 +202,16 @@ import Storage
 import SameAccount
 import StoragePlug
 import SystemConfiguration
+import ChildAccount
+import Share
+import Sound
 from Database import DatabaseError
 
 # first words that take a second word to make the command
-OBJECT = ("system" ,"storage" ,"account" ,"same-account" ,"limit")
+OBJECT = ("system" ,"storage" ,"account" ,"same-account" ,"limit" ,"share" ,"sound")
 
 # commands that only read, and so may be run by anyone with read access
-READ_ONLY = ("system show" ,"storage show" ,"same-account show" ,"same-account suggest")
+READ_ONLY = ("system show" ,"storage show" ,"same-account show" ,"same-account suggest" ,"sound show")
 
 
 def print_help():
@@ -284,6 +310,8 @@ def CLI(argv=None):
       return SameAccount.same_account__show({"dirp__storage": rest[1]} if rest else None)
     if command == "same-account suggest" and len(rest) == 2 and rest[0] == "storage":
       return SameAccount.same_account__suggest({"dirp__storage": rest[1]})
+    if command == "sound show" and not rest:
+      return allowance__print(log)
 
     # ---- changes
     if command == "system make" and len(rest) in (0 ,2):
@@ -309,6 +337,12 @@ def CLI(argv=None):
       header(command ,dirp__storage ,preview)
       Storage.account__make(dirp__storage ,name ,database_uid ,keyword.get("parent") ,"make-system-account" in keyword ,log ,preview,
                             keyword.get("from"))
+    elif command == "account deallocate" and len(rest) == 1:
+      header(command ,None ,preview)
+      ChildAccount.child__deallocate(rest[0] ,log ,preview)
+    elif command == "share record" and len(rest) == 1:
+      header(command ,rest[0] ,preview)
+      Share.share__record(rest[0] ,log ,preview)
     elif command == "is-same-account" and rest:
       specifier ,keyword = split_keyword(rest ,6 ,("make-system-account",))
       system_spec ,storage_spec = system_and_storage(list__account_specifier(specifier))
@@ -349,6 +383,9 @@ def CLI(argv=None):
     elif command == "storage unplug" and len(rest) == 1:
       header(command ,None ,preview)
       StoragePlug.unplug(rest[0] ,log ,preview)
+    elif command in ("sound allow" ,"sound deny") and len(rest) == 1:
+      header(command ,None ,preview)
+      Sound.allowance__set(rest[0] ,command == "sound allow" ,log ,preview)
     elif command == "limit set" and len(rest) == 2:
       header(command ,None ,preview)
       System.limit__set(rest[0] ,integer(rest[1] ,"<maximum>") ,log ,preview)
@@ -357,6 +394,17 @@ def CLI(argv=None):
   except (DatabaseError ,ValueError) as error:
     log.error(command ,str(error))
   return log.summary()
+
+def allowance__print(log):
+  "print the allowances this system gives, from Sound.list__allowance"
+  db = System.open_system_database(log)
+  if db is None: return 1
+  list__row = Sound.list__allowance(db)
+  if not list__row:
+    print("this system gives no login account sound")
+  for r in list__row:
+    print(f"{r['resource']:<8}{r['system_account__name']:<28}given {r['given']}")
+  return 0
 
 def header(command ,dirp__storage ,preview):
   where = f"   on {os.path.abspath(dirp__storage)}" if dirp__storage else ""

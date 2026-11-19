@@ -121,7 +121,18 @@ def execute():
   except Language.DefinitionError as error:
     log("cannot-execute" ,str(error))
     return 2
-  status ,result ,list__fd = Interpreter.interpret(sys.stdin.buffer.read() ,language_definition ,library_instruction ,log ,guard_program ,gate_invoking_account)
+  # While the journal plays, standard output is standard error: the gate reads
+  # standard output as the verdict alone, so a line a work function or a
+  # program it runs writes there would make the gate refuse the run.
+  sys.stdout.flush()
+  fd__verdict = os.dup(1)
+  os.dup2(2 ,1)
+  try:
+    status ,result ,list__fd = Interpreter.interpret(sys.stdin.buffer.read() ,language_definition ,library_instruction ,log ,guard_program ,gate_invoking_account)
+  finally:
+    sys.stdout.flush()
+    os.dup2(fd__verdict ,1)
+    os.close(fd__verdict)
   if status != 0:
     return status
   if result is not None:

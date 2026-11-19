@@ -14,6 +14,20 @@ from pathlib import Path
 
 import Database
 from Common import host_name ,act
+
+# How many accounts can be below an account for which the administrator has set
+# no limit, counted in its storage database, those deallocated left out.
+LIMIT__DEFAULT = 100
+
+def limit__of(db ,system_account__name):
+  """
+  The limit of a system account: the one set for it, or LIMIT__DEFAULT. db
+  is the system database, a Database.Database or a read-only sqlite3
+  connection.
+  """
+  statement ,parameter = "SELECT maximum FROM account_limit WHERE system_account__name = ?" ,(system_account__name,)
+  row = db.row(statement ,parameter) if hasattr(db ,"row") else db.execute(statement ,parameter).fetchone()
+  return row[0] if row else LIMIT__DEFAULT
 from SystemAccount import system_account ,system_account__by_system_uid
 
 DEFAULT__SYSTEM_UID__FIRST = 2000
@@ -145,5 +159,5 @@ def limit__set(system_account__name ,maximum ,log ,preview):
   with db.transaction(f"set limit of {system_account__name} to {maximum}" ,preview) as t:
     t.execute("INSERT INTO account_limit(system_account__name ,maximum) VALUES (? ,?)"
               " ON CONFLICT(system_account__name) DO UPDATE SET maximum = excluded.maximum" ,(system_account__name ,maximum))
-  was = f"was {old['maximum']}" if old else "was unset, which counts as 0"
+  was = f"was {old['maximum']}" if old else f"was unset, which counts as {LIMIT__DEFAULT}"
   log.line("set" ,f"{system_account__name} limit {maximum}" ,was)

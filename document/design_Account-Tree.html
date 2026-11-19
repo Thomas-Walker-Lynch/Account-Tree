@@ -24,7 +24,7 @@
     <RT·article>
       <RT·title
         author="Thomas Walker Lynch"
-        date="2026-11-04"
+        date="2026-11-18"
         title="Account-Tree 5.0 Design">
       </RT·title>
 
@@ -33,11 +33,11 @@
       <h1>Purpose</h1>
 
       <p>
-        Account-Tree keeps light containers made of Linux accounts. A person's work is divided among accounts, each with its own files and processes, so that a web browser, an email program and a development project cannot read each other's files, without the cost of a virtual machine. This document gives the design as it is currently envisioned, for the standard numbered 5.0. It covers the accounts, the storage that keeps their data, the systems the storage is attached to, the databases, the server that changes accounts and mounts, the programs around the server, and login. Where a decision is still open it is marked as open. The features planned for later standards are listed at the end.
+        Account-Tree keeps light containers made of Linux accounts. A person's work is divided among accounts, each with its own files and processes, so that a web browser, an email program and a development project cannot read each other's files, without the cost of a virtual machine. This document gives the design as it is currently envisioned, for the standard numbered 5.0. It covers the accounts, the storage that keeps their data, the systems the storage is attached to, the databases, the requests through which accounts and mounts are changed, entering an account, shares, the programs that make them, and the transfer still to be built. Sound has a document of its own, <RT·code>design_audio.html</RT·code>. Where a decision is still open it is marked as open. Where the code does not yet do what the design describes, the text says so, and the section State of the code gathers every such place, with the known defects, so that a reader starting a session learns from this document what the code does. The features planned for later standards are listed at the end.
       </p>
 
       <p>
-        <RT·code>document/doc_2.html</RT·code> gives the reasoning behind the flat home directories and the idmapped views. It was written in the earlier terms described below; this document builds on it.
+        <RT·code>document/doc_2.html</RT·code> gives the reasoning behind the flat home directories. It was written in the earlier terms described below, and it also proposed views, idmapped mounts through which a parent account sees its child accounts' files as its own. This design has set views aside, for the reasons given under Transfer.
       </p>
 
       <h1>Ontology</h1>
@@ -72,44 +72,52 @@
       </ul>
 
       <p>
-        Every account is entered through its parent. Root enters its child accounts through the system's login programs, the display manager, <RT·code>login</RT·code> at the console and <RT·code>sshd</RT·code>, which run under root and start a session for a person who gives a password or a key. A login account enters its child accounts through the Account-Tree server, which starts sessions and programs in them; an account below a login account has no password, and the login programs do not enter it. The rule is the same at every level of the tree. Only the means differ, and the means for root's children are the ones Linux already has.
+        Every account is entered through its parent. Root enters its child accounts through the system's login programs, the display manager, <RT·code>login</RT·code> at the console and <RT·code>sshd</RT·code>, which run as root and start a session for a person who gives a password or a key. A login account enters its child accounts through Account-Tree's request gate, which starts sessions and programs in them; an account below a login account has no password, and the login programs do not enter it. The rule is the same at every level of the tree. Only the means differ, and the means for root's children are the ones Linux already has.
       </p>
 
       <p>
-        A parent account reaches a child account's files through a view.
+        A parent account reaches a child account's files through a transfer, in which each file is read by a process under the account that owns it and written by a process under the account that is to own it. Transfer is described below.
       </p>
-
-      <ul>
-      </ul>
 
       <p>
         An account's name is its parent's name, the middle dot, and its own short name: <RT·code>Thomas·developer·scratch</RT·code> is a child of <RT·code>Thomas·developer</RT·code>, which is a child of the login account <RT·code>Thomas</RT·code>, which is a child of root. In identifiers the wider category comes first, so prose says child account and parent account, and code says <RT·code>account_child</RT·code> and <RT·code>account_parent</RT·code>.
       </p>
 
-      <h1>Terms</h1>
+      <h1>Term</h1>
 
       <ul>
         <li><RT·term>storage</RT·term>: a persistent storage device carrying accounts' data, such as the SSD inside a laptop or an encrypted USB drive. Its root is the directory it is mounted at. A storage can be moved between machines.</li>
-        <li><RT·term>tree dir</RT·term>: the directory <RT·code>&lt;storage root&gt;/home/Account-Tree</RT·code>, holding the storage database and the accounts' homes. On the disk a system runs from it is <RT·code>/home/Account-Tree</RT·code>. Account-Tree_admin is given a tree dir to name a storage.</li>
+        <li><RT·term>Account-Tree directory</RT·term>: the directory <RT·code>&lt;storage root&gt;/home/Account-Tree</RT·code>, holding the storage database and the accounts' homes. On the disk a system runs from it is <RT·code>/home/Account-Tree</RT·code>. Account-Tree_admin is given a storage's root to name a storage, and finds the Account-Tree directory below it.</li>
         <li><RT·term>system</RT·term>: an installed, running Linux, with its own <RT·code>/etc/passwd</RT·code>, its own uid numbering, and its own <RT·code>/home</RT·code>, into which the accounts kept on attached storage are mounted.</li>
         <li><RT·term>system account</RT·term>: an account in a system's <RT·code>/etc/passwd</RT·code>. <RT·term>storage account</RT·term>: an account in a storage database.</li>
-        <li><RT·term>storage database</RT·term>: the SQLite database in a tree dir, describing the storage accounts kept on that storage.</li>
+        <li><RT·term>storage database</RT·term>: the SQLite database in an Account-Tree directory, describing the storage accounts kept on that storage.</li>
         <li><RT·term>system database</RT·term>: the SQLite database at <RT·code>/var/lib/Account-Tree/system.sqlite3</RT·code>, a system's own record. Its system map is the authority for which storage accounts are the same accounts as system accounts.</li>
         <li><RT·term>database uuid</RT·term>: the random identifier a storage database is given when it is made. It names the database, not the storage: a copy of the database carries it too. It is not the storage uuid that a file system is given when it is formatted, which Account-Tree does not use.</li>
         <li><RT·term>system uuid</RT·term>: the random identifier a system database is given when it is made, which names the system.</li>
         <li><RT·term>database uid</RT·term>: a storage account's uid in its storage database's own numbering. The account's files on the storage carry it.</li>
         <li><RT·term>system uid</RT·term>: a system account's uid, in <RT·code>/etc/passwd</RT·code>.</li>
-        <li><RT·term>account specifier</RT·term>: the name of an account in one place: <RT·code>system &lt;host name&gt; &lt;system account&gt;</RT·code>, or <RT·code>storage &lt;tree dir&gt; &lt;storage account&gt;</RT·code>.</li>
+        <li><RT·term>account specifier</RT·term>: the name of an account in one place: <RT·code>system &lt;host name&gt; &lt;system account&gt;</RT·code>, or <RT·code>storage &lt;dirp_storage&gt; &lt;storage account&gt;</RT·code>.</li>
         <li><RT·term>same account</RT·term>: two account specifiers that name one account in two places. The system map records which system accounts are the same accounts as which storage accounts.</li>
-        <li><RT·term>view</RT·term>: an idmapped mount through which a parent account sees a child account's files as its own.</li>
-        <li><RT·term>server</RT·term>: the program that changes accounts, databases and mounts on behalf of persons. It runs under an unprivileged account of its own, <RT·code>Account-Tree</RT·code>, and makes every change to the system through journal interpreters.</li>
-        <li><RT·term>journal interpreter</RT·term>: a small program of Man-In-Grey's design, run under root through its gate, that receives a journal of commands, has its guard check every command against its constraints, and only then executes them. Account-Tree has one bespoke journal interpreter for each of its command languages. <RT·code>Man-In-Grey.html</RT·code> gives the design.</li>
+        <li><RT·term>current account</RT·term>: the account a program runs under. A program started in a session that <RT·code>enter</RT·code> began runs under the entered account, which is then its current account.</li>
+        <li><RT·term>share</RT·term>: the membership of one account in the own group of another, through which the first reaches what the second gives its group. Shares are kept in the storage database.</li>
+        <li><RT·term>transfer</RT·term>: a list, copy or move of files between two accounts, made by a reader under the source account and a writer under the target account. To be built.</li>
+        <li><RT·term>bus</RT·term>: a summing node in a login account's sound, with a gather end and a broadcast end, to which accounts holding permits connect their programs; see <RT·code>design_audio.html</RT·code>.</li>
+        <li><RT·term>grant</RT·term>: a login account's grant of sound, which the system issues and revokes; see <RT·code>design_audio.html</RT·code>.</li>
+        <li><RT·term>permit</RT·term>: an account's permit for one end of one bus, or one device, which an account above it issues and revokes; see <RT·code>design_audio.html</RT·code>.</li>
+        <li><RT·term>request</RT·term>: what a person asks of Account-Tree, such as making a child account. A request is an instruction of the request language, given in a journal to the request gate.</li>
+        <li><RT·term>gate</RT·term>, <RT·term>guard</RT·term>, <RT·term>interpreter</RT·term>: Man-In-Grey's parts. A journal given to a gate is checked by its guard, and played by its interpreter only when the guard approves it. The gate invoking account is the account that started the gate, which the kernel reports as its real uid; the gate owner account is the one whose effective uid the guard and interpreter run with. <RT·code>Man-In-Grey.html</RT·code> gives the design.</li>
+        <li><RT·term>database account</RT·term>: the system account <RT·code>Account-Tree</RT·code>, which is to own Account-Tree's databases and be the only account that opens them, besides root. It is to hold no other privilege. Not yet built; see The database account.</li>
+        <li><RT·term>answer</RT·term>: the result one interpreter hands back to the program that invoked its gate, on descriptor 3, which that program checks before it acts on it. Descriptor 3 is a Unix socket, so a result carries open descriptors as well as bytes.</li>
         <li><RT·term>unmanaged account</RT·term>: an account Account-Tree does not manage, such as root, a service's account, or an account made with <RT·code>useradd</RT·code> by hand.</li>
       </ul>
 
-      <h1>Accounts and names</h1>
+      <p>
+        In this document, in <RT·code>design_audio.html</RT·code> and in the code, <em>grant</em> and <em>permit</em> are nouns and never verbs. A grant or a permit is <em>issued</em>, <em>held</em> and <em>revoked</em>; nothing is "granted" or "permitted". The verbs are shared, and the noun says which is meant.
+      </p>
 
-      <h2>Account names</h2>
+      <h1>Account and name</h1>
+
+      <h2>Account name</h2>
 
       <p>
         The middle dot (U+00B7, written <RT·code>·</RT·code>) is not permitted in a short name, so a full name divides in exactly one way, and the conventional characters <RT·code>_</RT·code>, <RT·code>-</RT·code> and <RT·code>.</RT·code> remain free for use in names. It lies outside the POSIX portable character set. Making an account needs the <RT·code>--badname</RT·code> flag of <RT·code>useradd</RT·code>, and a tool that checks account names against the portable set needs its check widened. In UTF-8 the middle dot is two bytes, and an account name is currently limited to 32 bytes. That limit is set in user space, by the fixed name field of the <RT·code>utmp</RT·code> login records and by <RT·code>useradd</RT·code>, not by the kernel, which knows accounts only by uid. pkg-config prints paths holding the middle dot in a form that is not valid UTF-8; builds that pass such paths through pkg-config need the workaround given in <RT·code>shared/project-dependency/Python.org</RT·code>.
@@ -117,6 +125,25 @@
 
       <p>
         The name <RT·code>Account-Tree</RT·code> is reserved, because on a running system <RT·code>/home/Account-Tree</RT·code> holds Account-Tree's own files. A system account made for a branch of a storage database is named with a tilde and eight hex digits, as <RT·code>Thomas·try~a7b3247f</RT·code>, described under Copies. That is a default, not a rule on names: the system map, not the name, records which system accounts belong to a branch.
+      </p>
+
+      <h2>Name relative to the current account</h2>
+
+      <p>
+        A person names an account to Account-Tree relative to the current account, or absolutely, from root, with a leading middle dot. A relative name is the current account's name, the middle dot, and the text given; under root it is the text given. The middle dot alone names root. A trailing middle dot is refused, because it is reserved to name the container of an account's child accounts. Run under <RT·code>Thomas</RT·code>:
+      </p>
+
+      <RT·code>
+        developer              Thomas·developer
+        developer·build        Thomas·developer·build
+        Thomas                 Thomas·Thomas, a child account named Thomas
+        ·Thomas                Thomas
+        ·Thomas·developer      Thomas·developer
+        ·                      root
+      </RT·code>
+
+      <p>
+        Relative names follow the current account through <RT·code>enter</RT·code>: in a session of <RT·code>Thomas·developer</RT·code>, <RT·code>build</RT·code> names <RT·code>Thomas·developer·build</RT·code>. <RT·code>AccountTree.account_name__expand</RT·code> makes the expansion and <RT·code>AccountTree.account_name__specifier</RT·code> writes a full name back in absolute form. <RT·code>Account-Tree current</RT·code> prints the current account absolutely, so a script started in a session learns where it is, as in <RT·code>Account-Tree window "$(Account-Tree current)"</RT·code>. The request gate is given full names: the person's program expands a name before it composes a journal, against its current account, which is the gate invoking account.
       </p>
 
       <h2>Identity of an account</h2>
@@ -133,22 +160,30 @@
         On a running system, the account also needs a system uid, because that numbering is the one <RT·code>/etc/passwd</RT·code> and the kernel use there. A row of the system map gives it: the row pairs the storage account's identity with a system account. The account's extended identity is its identity in its storage database, joined through the system map to the system.
       </p>
 
-      <h1>Storage and systems</h1>
+      <h1>Storage and system</h1>
 
       <h2>Storage layout</h2>
 
       <p>
-        Every storage has the same layout under its root, where the root is the directory the storage is mounted at: <RT·code>/</RT·code> for the disk a system runs from, or a mount point such as <RT·code>/mnt/Eagle</RT·code> for a drive plugged in. Its tree dir is <RT·code>home/Account-Tree</RT·code> under the root, so <RT·code>/home/Account-Tree</RT·code> or <RT·code>/mnt/Eagle/home/Account-Tree</RT·code>.
+        Every storage has the same layout under its root, where the root is the directory the storage is mounted at: <RT·code>/</RT·code> for the disk a system runs from, or a mount point such as <RT·code>/mnt/Eagle</RT·code> for a drive plugged in. Its Account-Tree directory is <RT·code>home/Account-Tree</RT·code> under the root, so <RT·code>/home/Account-Tree</RT·code> or <RT·code>/mnt/Eagle/home/Account-Tree</RT·code>.
       </p>
 
       <RT·code>
-        home/Account-Tree/database.sqlite3            the storage database
-        home/Account-Tree/account-data/&lt;name&gt;     the home of each storage account, by name
-        home/&lt;other&gt;                               anything else, such as the homes of unmanaged accounts
+        home/Account-Tree/                                      the Account-Tree directory, root's, mode 0700
+        home/Account-Tree/database.sqlite3                      the storage database, root's, mode 0600
+        home/Account-Tree/account-data/                         root's, mode 0700
+        home/Account-Tree/account-data/&lt;name&gt;               the home of each storage account, by name
+        home/Account-Tree/account-deallocated/                  root's, mode 0700
+        home/Account-Tree/account-deallocated/&lt;name&gt;.&lt;time&gt;  the home of a deallocated account, which only the administrator removes
+        home/&lt;other&gt;                                         anything else, such as the homes of unmanaged accounts
       </RT·code>
 
       <p>
-        Everything Account-Tree keeps on a storage is under its tree dir, so the storage can carry other things beside it, and the storage database sits with the data it describes. <RT·code>account-data</RT·code> holds the accounts' homes; on a running system each is reached through an idmapped mount at <RT·code>/home/&lt;system account&gt;</RT·code>. An account named <RT·code>database</RT·code> cannot collide with the database, because the two are at different levels.
+        Everything Account-Tree keeps on a storage is under its Account-Tree directory, so the storage can carry other things beside it, and the storage database sits with the data it describes. <RT·code>account-data</RT·code> holds the accounts' homes; on a running system each is reached through an idmapped mount at <RT·code>/home/&lt;system account&gt;</RT·code>. A deallocated account's home is moved to <RT·code>account-deallocated</RT·code>, its name followed by the UTC time of the move, so the name can be given to a new account while the old files remain. An account named <RT·code>database</RT·code> cannot collide with anything of Account-Tree's, because homes are a level below.
+      </p>
+
+      <p>
+        The database account, once built, divides the Account-Tree directory with root. SQLite writes a journal file beside a database while a transaction is open, so the account that writes a database needs to write the directory it is in; the database then moves into a directory of its own, <RT·code>database/</RT·code>, owned by the database account, mode 0700, and everything else stays root's. The database account passes through the Account-Tree directory, given mode 0711, to reach its directory, but cannot enter <RT·code>account-data</RT·code>, so it cannot rename, move or read a home. A root interpreter that checks a home's owner on disk is then checking something the database account could not have arranged; see Answer check.
       </p>
 
       <p>
@@ -165,10 +200,10 @@
         A storage is a repository of accounts' data, whether it is built into the machine or plugged in, and a machine can have several. The SSD inside a laptop is attached at boot, before any login, in the same way a USB drive is attached when it is plugged in. Taken out of the laptop and put into a USB enclosure, the same SSD can be attached to another machine, and its accounts used there.
       </p>
 
-      <h2>Copies and branches</h2>
+      <h2>Copy and branch</h2>
 
       <p>
-        The database uuid names the database, not the storage it is on. A copy of a tree dir, made for a backup or an archive, carries the same database uuid, and is the same database until one of the two is changed. Because a tree dir can be anywhere, an archive kept at <RT·code>/&lt;storage name&gt;/&lt;date&gt;/home/Account-Tree</RT·code> can be attached by giving that tree dir.
+        The database uuid names the database, not the storage it is on. A copy of an Account-Tree directory, made for a backup or an archive, carries the same database uuid, and is the same database until one of the two is changed. Because an Account-Tree directory can be anywhere, an archive kept at <RT·code>/&lt;storage name&gt;/&lt;date&gt;/home/Account-Tree</RT·code> can be attached by giving <RT·code>/&lt;storage name&gt;/&lt;date&gt;</RT·code> as the storage's root.
       </p>
 
       <p>
@@ -176,7 +211,7 @@
       </p>
 
       <ul>
-        <li>Every attach and every detach is a transaction in the storage database. Two copies used apart therefore have different heads, even when no account was made or changed on either.</li>
+        <li>Every attach and every detach is a transaction in the storage database, which updates its <RT·code>system_seen</RT·code> row. Two copies used apart therefore have different heads, even when no account was made or changed on either. A detach is not recorded when the drive was pulled out before unplug could write to it; the next attach finds the head it last recorded.</li>
         <li>The system records every head of each storage database it sees, in its <RT·code>storage_head__seen</RT·code> table: when one of its accounts is made the same account as a system account, and at each attach and detach.</li>
       </ul>
 
@@ -185,6 +220,7 @@
       </p>
 
       <ul>
+        <li><em>new</em>: no head of it has been seen here. It attaches without comment.</li>
         <li><em>forward</em>: its record holds the last head seen. It is the storage seen before, moved on, perhaps on another system. It attaches without comment. The system does not care how far along the storage has gone, only that it has not gone back, or sideways.</li>
         <li><em>backwards</em>: its head is one seen earlier, and another state of the database has been attached since. It is an older copy, or the other line of a branch.</li>
         <li><em>sideways</em>: its record holds an earlier head seen, but not the last one. It is a branch, two copies each changed after they parted, or an older copy whose head this system never saw.</li>
@@ -196,7 +232,7 @@
       </p>
 
       <p>
-        The two lines can also be kept apart, so that both can be attached at once and their files compared. <RT·code>attach &lt;tree dir&gt; branch</RT·code> makes the storage a branch: it gives the database a new database uuid, records in it the database it came from and the head they parted after, and makes a system account for each storage account that had one on the line it came from, named <RT·code>&lt;system account&gt;~&lt;eight hex digits&gt;</RT·code>. The eight digits begin the hash of the transaction that made the branch, which no other branch has, and which does not change as either line grows. The branch is then a storage database in its own right.
+        The two lines can also be kept apart, so that both can be attached at once and their files compared. <RT·code>attach &lt;dirp_storage&gt; branch</RT·code> makes the storage a branch: it gives the database a new database uuid, records in it the database it came from and the head they parted after, and makes a system account for each storage account that had one on the line it came from, named <RT·code>&lt;system account&gt;~&lt;eight hex digits&gt;</RT·code>. The eight digits begin the hash of the transaction that made the branch, which no other branch has, and which does not change as either line grows. The branch is then a storage database in its own right.
       </p>
 
       <p>
@@ -218,14 +254,14 @@
       </p>
 
       <p>
-        A storage database gives out database uids counting down from 1999999999, while systems give out system uids counting up from low numbers. A database uid is therefore not also the system uid of an account, and a file on a storage, seen without its mount, does not appear to belong to a system account it does not belong to, except in the cases given under Limits of uids. The band 1879048192 to 2147352575 is left unused by systemd's allocation of uids, so a storage database has about 120 million database uids before it leaves the band. An account brought into Account-Tree from an existing one can keep its existing uid, with the keyword <RT·code>uid</RT·code> of <RT·code>account make</RT·code>; for that account the coincidence remains, behind the root-only directories of the tree dir.
+        A storage database gives out database uids counting down from 1999999999, while systems give out system uids counting up from low numbers. A database uid is therefore not also the system uid of an account, and a file on a storage, seen without its mount, does not appear to belong to a system account it does not belong to, except in the cases given under Limit of a uid. The band 1879048192 to 2147352575 is left unused by systemd's allocation of uids, so a storage database has about 120 million database uids before it leaves the band. An account brought into Account-Tree from an existing one can keep its existing uid, with the keyword <RT·code>uid</RT·code> of <RT·code>account make</RT·code>; for that account the coincidence remains, behind the root-only directories of the Account-Tree directory.
       </p>
 
       <p>
         A storage database never reuses a database uid. A database uid given up by a deallocated account stays retired, because files carrying it can remain on the storage, in a backup, or on another storage they were copied to.
       </p>
 
-      <h2>Limits of uids</h2>
+      <h2>Limit of a uid</h2>
 
       <p>
         Two numberings meet on a running system: database uids, on the files of storage, and system uids, in <RT·code>/etc/passwd</RT·code>. Each has limits, set by different parties, and each limit is checked where the party that sets it is known.
@@ -255,7 +291,7 @@
       </ul>
 
       <p>
-        At attach, the database uids of the storage are to be compared with the system uids in use, from the system's account database, which includes directory services, and from <RT·code>/etc/subuid</RT·code>. Each coincidence is logged with the system account that would appear to own the raw files. A coincidence is not refused: through the mounts each account sees its own files correctly, and the raw files are behind the tree dir, which only the server's account and root can enter. It is reported because a tool that works by uid on the raw files, run under root, would treat them as that account's. This check is not yet built.
+        At attach, the database uids of the storage are to be compared with the system uids in use, from the system's account database, which includes directory services, and from <RT·code>/etc/subuid</RT·code>. Each coincidence is logged with the system account that would appear to own the raw files. A coincidence is not refused: through the mounts each account sees its own files correctly, and the raw files are behind <RT·code>account-data</RT·code>, which only root can enter. It is reported because a tool that works by uid on the raw files, run as root, would treat them as that account's. This check is not yet built.
       </p>
 
       <p>
@@ -269,7 +305,7 @@
       </p>
 
       <p>
-        A system never reuses a system uid. Its own disk keeps files carrying system uids, in <RT·code>/tmp</RT·code>, <RT·code>/var/spool</RT·code>, crontabs and logs, and a reused uid would hand them to another account. The system map therefore keeps every row it has held, retired rows included, and a system account Account-Tree makes is never given a system uid that appears in it.
+        A system's own disk keeps files carrying system uids, in <RT·code>/tmp</RT·code>, <RT·code>/var/spool</RT·code>, crontabs and logs, and a reused uid would hand them to another account. The system map therefore keeps every row it has held, retired rows included, and a system account Account-Tree makes is never given a system uid that a row in use or retired holds. The one exception is unplug, described under Plug and unplug: it deletes the system account of a removable storage's account and frees its system uid, after deleting the files that account left in the places where accounts leave them, so that the system uid can be given again. A file it left anywhere else would belong to whoever is given the uid next.
       </p>
 
       <p>
@@ -279,55 +315,61 @@
       <h2>Deleting storage</h2>
 
       <p>
-        <RT·code>Account-Tree_admin storage delete &lt;tree dir&gt;</RT·code> undoes, on this system, what Account-Tree did for the accounts of the storage database, then deletes the tree dir. It makes every check first, and a failed check changes nothing:
+        <RT·code>Account-Tree_admin storage delete &lt;dirp_storage&gt;</RT·code> undoes, on this system, what Account-Tree did for the accounts of the storage database, then deletes the Account-Tree directory. It makes every check first, and a failed check changes nothing:
       </p>
 
       <ul>
         <li>the storage database names no other system that has seen it, since that system's map would name a database that no longer exists, unless the keyword <RT·code>forget-other-systems</RT·code> is given;</li>
         <li>no system account that is the same account as one of its accounts has a login session;</li>
-        <li>nothing is mounted inside the tree dir;</li>
-        <li>the tree dir holds only the storage database and <RT·code>account-data</RT·code>, and <RT·code>account-data</RT·code> holds only homes of the database's accounts;</li>
-        <li>homes that hold files are deleted only when the keyword <RT·code>delete-account-data</RT·code> is given.</li>
+        <li>nothing is mounted inside the Account-Tree directory;</li>
+        <li>the Account-Tree directory holds only the storage database, <RT·code>account-data</RT·code> and <RT·code>account-deallocated</RT·code>, and <RT·code>account-data</RT·code> holds only homes of the database's accounts;</li>
+        <li>homes that hold files, and any deallocated home, are deleted only when the keyword <RT·code>delete-account-data</RT·code> is given.</li>
       </ul>
 
       <p>
-        For each row of this system's map naming one of its accounts, it then unmounts the home, deletes the mount point attach made, recognized as an empty directory owned by root with mode 0000, deletes the system account and its group when Account-Tree made them, keeps an adopted system account, and retires the row. Last it deletes <RT·code>account-data</RT·code>, the storage database and the tree dir. Run a second time, it finds nothing to delete and says so. <RT·code>system delete</RT·code> deletes the system database, and is refused while any row of the system map is in use.
+        For each row of this system's map naming one of its accounts, it then unmounts the home, deletes the mount point attach made, recognized as an empty directory owned by root with mode 0000, deletes the system account and its group when Account-Tree made them, keeps an adopted system account, and retires the row. Last it deletes <RT·code>account-data</RT·code>, <RT·code>account-deallocated</RT·code>, the storage database and the Account-Tree directory. Run a second time, it finds nothing to delete and says so. <RT·code>system delete</RT·code> deletes the system database, and is refused while any row of the system map is in use.
       </p>
 
-      <h1>The databases</h1>
+      <h1>Database</h1>
 
       <p>
         There are two kinds of database, with two schemas, <RT·code>schema_storage.sql</RT·code> and <RT·code>schema_system.sql</RT·code>. Both keep the same record of changes, described below, and are checked the same way. Each fact is kept by the party with authority over it: a storage database keeps its accounts and their database uids; the system database keeps which of those accounts are the same accounts as system accounts.
       </p>
 
-      <h2>Storage database tables</h2>
+      <h2>Storage database table</h2>
 
       <ul>
         <li><RT·code>identity</RT·code>: the database uuid, the uuid it was made with, from which its chain begins, and for a branch, the database it came from and the head they parted after; the series number, the head hash, and when it was made. One row. A storage database has no name for people. A name would travel with every copy of the database, and a name taken from the storage it was made on would come to mislead once the database was copied elsewhere. A database is shown by its database uuid, its series number, its head hash and the time of its last change, and log lines give the first eight digits of the database uuid.</li>
         <li><RT·code>standard</RT·code>: the Account-Tree standards this database follows, one row each. Currently <RT·code>5.0</RT·code>.</li>
-        <li><RT·code>account</RT·code>: one row per storage account: database uid, name, the database uid and name of its parent, state (<RT·code>active</RT·code>, <RT·code>deprecated</RT·code>, <RT·code>deallocated</RT·code>), and times. The parent's database uid is empty when the parent is root or is carried by another database.</li>
+        <li><RT·code>account</RT·code>: one row per storage account: database uid, name, the database uid and name of its parent, state (<RT·code>active</RT·code> or <RT·code>deallocated</RT·code>), and times. The parent's database uid is empty when the parent is root or is carried by another database. A deallocated account's row is kept, renamed to the name of its home in <RT·code>account-deallocated</RT·code>. The state <RT·code>deprecated</RT·code> is found only in rows an earlier version wrote: such an account's home is not mounted, and it can be deallocated.</li>
+        <li><RT·code>account_share</RT·code>: one row for each share: the database uid of the account whose own group it is, the database uid of the member, and when it was made. Both accounts are of this database.</li>
+        <li><RT·code>account_setting</RT·code>: what a storage account's system account has that its home does not carry: the password hash, as <RT·code>/etc/shadow</RT·code> keeps it, the password aging fields, the comment and the shell, with when they were saved; a field empty in <RT·code>/etc/shadow</RT·code> is NULL. Written at each unplug, from the system unplugged from, while the storage can still be read, and given to the system account made again at the next plug, on whichever system. A person's password is then the same on every system the storage is plugged into.</li>
+        <li><RT·code>sound_bus</RT·code>, <RT·code>sound_permit_bus_end</RT·code>, <RT·code>sound_permit_device</RT·code>, <RT·code>sound_connection_table</RT·code> and <RT·code>sound_connection</RT·code>: the buses of each tree, the permits each account holds, and each account's connection table; see <RT·code>design_audio.html</RT·code>.</li>
         <li><RT·code>database_uid</RT·code>: every database uid this database has ever given out, with whether it is in use or retired.</li>
         <li><RT·code>system_seen</RT·code>: the systems that have seen this database, with when that was first and last. For the owner of the storage, and for <RT·code>storage delete</RT·code>, which will not leave a system mapping a database that no longer exists. Never authority.</li>
         <li><RT·code>acquaintance_database</RT·code> and <RT·code>same_account__database</RT·code>: other storage databases this one knows, and which of their accounts are the same accounts as accounts here, by database uid. Written into both databases. Not used in 5.0.</li>
         <li><RT·code>transaction_log</RT·code>: the record of every change, described below.</li>
       </ul>
 
-      <h2>System database tables</h2>
+      <h2>System database table</h2>
 
       <ul>
         <li><RT·code>identity</RT·code>: the system uuid, the series number, the head hash, and when the database was made. One row. The system is shown by its host name, read when it is shown, so a name for people is not kept.</li>
         <li><RT·code>standard</RT·code>: as for a storage database.</li>
         <li><RT·code>system_uid__range</RT·code>: the first and last system uid Account-Tree gives a system account it makes. One row.</li>
-        <li><RT·code>system_map</RT·code>: one row for each time a system account has been made the same account as a storage account: the system uid and gid, the system account's name, the database uuid and database uid, whether Account-Tree made the system account or adopted one that existed, whether the row is in use or retired, and when. At most one row in use names a given system uid, and at most one names a given storage account. A row is retired, never deleted. An adopted system account can be made the same account again once its row is retired; a system uid that appears in any row is never given to a system account Account-Tree makes.</li>
+        <li><RT·code>system_map</RT·code>: one row for each time a system account has been made the same account as a storage account: the system uid and gid, the system account's name, the database uuid and database uid, whether Account-Tree made the system account or adopted one that existed, its state, and when. The state is <RT·code>in use</RT·code>; <RT·code>unplugged</RT·code>, while the removable storage carrying the account is out, when the system uid and gid are empty; or <RT·code>retired</RT·code>. At most one row in use names a given system uid, and at most one row in use or unplugged names a given storage account. A row is retired, never deleted. An adopted system account can be made the same account again once its row is retired; a system uid held by a row in use or retired is never given to a system account Account-Tree makes.</li>
         <li><RT·code>storage_head__seen</RT·code>: every head of each storage database this system has seen, with the event (mapped, attached, detached), and at attach, the continuity found.</li>
-        <li><RT·code>account_limit</RT·code>: the number of child accounts each system account is allowed below it, by system uid. A system account with no row is allowed none.</li>
+        <li><RT·code>account_limit</RT·code>: the number of accounts each system account is allowed below it, by the system account's name, since the system uid of an account Account-Tree made changes each time its storage is plugged in. A system account with no row has the default limit, 100.</li>
+        <li><RT·code>storage_device</RT·code>: each removable storage registered here: its storage name, its LUKS uuid, the database uuid of the storage database it carries, its mount point, and whether the record is registered or retired.</li>
+        <li><RT·code>system_account__saved</RT·code> and <RT·code>system_account__saved_group</RT·code>: what an unplugged system account had that its storage does not carry, its password, aging, comment and shell, and its supplementary groups, by database uuid and database uid. Deleted when the system account is made again, or when the row is retired.</li>
+        <li><RT·code>resource_grant</RT·code>: the grants this system has issued to login accounts, for now of sound, by the login account's name; see <RT·code>design_audio.html</RT·code>.</li>
         <li><RT·code>transaction_log</RT·code>: the record of every change.</li>
       </ul>
 
       <h2>Series number and hash chain</h2>
 
       <p>
-        A transaction is one change to one database: the SQL statements a command of <RT·code>Account-Tree_admin</RT·code>, or a request to the server, runs against that database, recorded together. A command can make transactions in both kinds of database; <RT·code>is-same-account</RT·code> makes one in the storage database and one in the system database.
+        A transaction is one change to one database: the SQL statements a command of <RT·code>Account-Tree_admin</RT·code>, or a request, runs against that database, recorded together. A command can make transactions in both kinds of database; <RT·code>is-same-account</RT·code> makes one in the storage database and one in the system database.
       </p>
 
       <p>
@@ -335,7 +377,7 @@
       </p>
 
       <p>
-        The chain gives order, integrity and identity of history. It does not give authenticity. Anyone holding a database can extend its chain, or rewrite it and compute new hashes. What a rewrite cannot do is keep the hashes that others have already seen: a system that remembers a head finds that the rewritten record does not hold it. Each party that remembers a head is a witness. A storage database and the system database are readable only by the server's account and root, so the record is the database's own history, as a git repository's history is, rather than a log for persons to read.
+        The chain gives order, integrity and identity of history. It does not give authenticity. Anyone holding a database can extend its chain, or rewrite it and compute new hashes. What a rewrite cannot do is keep the hashes that others have already seen: a system that remembers a head finds that the rewritten record does not hold it. Each party that remembers a head is a witness. A storage database and the system database are readable only by root, mode 0600, and by the database account once it is built, so the record is the database's own history, as a git repository's history is, rather than a log for persons to read.
       </p>
 
       <p>
@@ -346,13 +388,13 @@
         Times recorded in a database are for people to read. They are not authoritative, because clocks differ between machines. The series number is authoritative.
       </p>
 
-      <h2>Standards</h2>
+      <h2>Standard</h2>
 
       <p>
         A program that opens a database first reads its <RT·code>standard</RT·code> table, and refuses a database that follows no standard the program follows. During a change from one standard to the next, a database lists both.
       </p>
 
-      <h2>Fallback tools</h2>
+      <h2>Fallback tool</h2>
 
       <p>
         The databases can be built by hand from SQL scripts kept in the project. They are the means of starting over if a database is lost or damaged.
@@ -364,14 +406,18 @@
         <li>Scripts with their data written into them can write the system map rows for existing system accounts, for a system whose system database is lost.</li>
       </ul>
 
-      <h1>Same accounts</h1>
+      <p>
+        Only the schema scripts, <RT·code>schema_storage.sql</RT·code> and <RT·code>schema_system.sql</RT·code>, exist so far.
+      </p>
+
+      <h1>Same account</h1>
 
       <p>
-        A storage account's home, <RT·code>account-data/&lt;name&gt;</RT·code> in its tree dir, carries only its database uid. What lets it be used on a system is a row of that system's map, saying that a system account there is the same account as the storage account. The administrator states it:
+        A storage account's home, <RT·code>account-data/&lt;name&gt;</RT·code> in its Account-Tree directory, carries only its database uid. What lets it be used on a system is a row of that system's map, saying that a system account there is the same account as the storage account. The administrator states it:
       </p>
 
       <RT·code>
-        Account-Tree_admin is-same-account system &lt;host name&gt; &lt;system account&gt; storage &lt;tree dir&gt; &lt;storage account&gt; [make-system-account]
+        Account-Tree_admin is-same-account system &lt;host name&gt; &lt;system account&gt; storage &lt;dirp_storage&gt; &lt;storage account&gt; [make-system-account]
       </RT·code>
 
       <p>
@@ -391,138 +437,243 @@
       </p>
 
       <p>
-        Two storage databases can record that an account of one is the same account as an account of the other, and can record it while a system's map says otherwise. Such a claim grants nothing until a system acts on it, as in mounting a parent account's view of a child account kept on other storage. A system acts only on its own record: it does not infer that two accounts are the same from what storage databases say, and where the claims of storage databases and its own map disagree, it reports the disagreement. A child account made through the server on this system was made by this system, which records the parent relation itself.
+        Two storage databases can record that an account of one is the same account as an account of the other, and can record it while a system's map says otherwise. Such a claim confers nothing until a system acts on it, as in entering a child account kept on other storage from its parent. A system acts only on its own record: it does not infer that two accounts are the same from what storage databases say, and where the claims of storage databases and its own map disagree, it reports the disagreement. A child account made through a request on this system was made by this system, which records the parent relation itself.
       </p>
 
       <p>
         In 5.0 storage databases and systems recognize each other by database uuid and system uuid alone. A copy of a storage database is taken for the original, and gains the system accounts mapped to the original's accounts. That is enough among one person's machines and storage. It is not enough among strangers, because either kind of uuid can be copied; keys are given under standard 6.0.
       </p>
 
-      <h1>The server</h1>
+      <h1>Request</h1>
 
-      <h2>What it is</h2>
+      <h2>No server</h2>
 
       <p>
-        The server is the one program that changes accounts, databases and mounts on behalf of persons. It runs as a system service under an account of its own, <RT·code>Account-Tree</RT·code>, which holds no privilege, and receives requests from any account over a Unix domain socket, <RT·code>/run/Account-Tree/socket</RT·code>. The socket is open to every account; the server decides what each request is allowed to do.
+        A person's program asks for what it wants by composing a journal and invoking a gate with it: Account-Tree's program is its own Man-In-Grey orchestrator, and no server stands between the person and the gate. The gate's real uid is the account that asked, reported by the kernel, so the guard knows who asks as a fact rather than as a claim in the journal. The place where authority is decided and the place where privilege changes are then one place, the gate, which is what Man-In-Grey was built to be.
       </p>
 
       <p>
-        The server owns Account-Tree's records: the system database, <RT·code>/var/lib/Account-Tree/system.sqlite3</RT·code>, and on each storage the tree dir and its storage database. It reads and writes them with its own rights. Every change to the system itself, an account in <RT·code>/etc/passwd</RT·code>, a home directory owned by a database uid, a mount, a session in another account, needs privilege the server does not have. For those the server composes a journal and hands it to a bespoke journal interpreter, through the interpreter's gate, following the design of Man-In-Grey.
+        An earlier form of this design had a server, running under an account of its own and receiving requests on a socket. The server learned the requesting account from <RT·code>SO_PEERCRED</RT·code>, but every journal it composed reached a root gate with the server as the gate invoking account, so the root guard would have had to trust the server's word for who asked. The server also wrote the system database, while the root guards checked their constraints against that database, so a compromised server could have written a record and then asked root to act on it. Taking the server away removes both.
       </p>
 
       <p>
-        The server handles one request at a time. Two requests can then never give out the same uid or the same name, and no locking is needed.
+        A gate is a function call. The program that invokes it waits, and is given back the gate's exit status and, on descriptor 3, the interpreter's result. A request's answer is therefore tied to the request by the kernel: it arrives on the descriptor of the gate the program started.
+      </p>
+
+      <p>
+        Descriptor 3 is one end of a Unix socket pair, which the program makes before it starts the gate. The interpreter sends the result's bytes on it, and with them, as <RT·code>SCM_RIGHTS</RT·code> ancillary data, any descriptors the result holds; the gate receives both and forwards them to the program the same way. In the result's CBOR a descriptor is a value of Man-In-Grey's <RT·code>descriptor</RT·code> type, carried under its own tag, which names its place among the descriptors sent. This is how <RT·code>enter</RT·code> hands back a terminal: the interpreter does not stay to relay it, and the program that asked holds the terminal's master side itself. A result is still a value returned by a function call; no channel is left open between the program and the gate.
+      </p>
+
+      <h2>The gate</h2>
+
+      <ul>
+        <li><em>The request gate</em>, <RT·code>Account_Tree__Gate·Request</RT·code>, owned by root, setuid and setgid, mode 6755. Any account invokes it. Its guard and interpreter run with root's effective uid and gid. Without the setgid bit the interpreter keeps the invoking account's gid, and every directory and file it makes, mount points among them, is given that account's group.</li>
+        <li><em>The record gate</em>, <RT·code>Account_Tree__Gate·Record</RT·code>, to be setuid to the database account, owned by it with the group root and mode 4750, so that only root can start it. A root interpreter is to invoke it to have the databases read or written; its guard and interpreter would run with the database account's effective uid. Not yet built.</li>
+        <li><em>The administrator's gate</em>, <RT·code>Account_Tree__Gate·Admin</RT·code>, to be not setuid, mode 0700, owned by root. <RT·code>Account-Tree_admin</RT·code> is to invoke it under root; its guard's constraints would allow only root. Not yet built.</li>
+      </ul>
+
+      <p>
+        In the code as it stands the request gate is the only gate. Its guard opens the databases read only, and its interpreter opens them for writing, both under root, through the same modules <RT·code>Account-Tree_admin</RT·code> uses; <RT·code>Account-Tree_admin</RT·code> calls its work functions directly under root. The record gate and the administrator's gate are the design these move to.
+      </p>
+
+      <p>
+        The administrator's gate needs no setuid bit, since root invokes it already holding root's rights, and without the bit the administrator's instructions have no setuid program to reach them by. It is a gate all the same, so that the administrator's journals pass a guard as a person's do, and the code that changes the system lives in one place, the interpreters. Making accounts the same, attaching, detaching and setting limits are all to go through it, at boot as at any other time.
+      </p>
+
+      <p>
+        <RT·code>Account-Tree_install</RT·code> installs the gate, its guard and interpreter and the modules they import under <RT·code>/usr/local/lib/Account-Tree</RT·code>, from a manifest, with the Man-In-Grey modules the guard and interpreter need copied into <RT·code>Man_In_Grey/</RT·code> beside them. It refuses to install onto a file system mounted <RT·code>nosuid</RT·code>, where the gate's bits would be ignored, and deletes any installed file the manifest does not name, so nothing left from an earlier version is imported. Before importing anything, the guard and the interpreter check the ownership and mode of every file in their own directory and in the Man-In-Grey directory, so that no module an account could write is run with root's rights.
+      </p>
+
+      <h2>The database account</h2>
+
+      <p>
+        Not yet built. The databases are to be opened by the database account and by no root process. A storage database is input from a drive: a copy, a branch, or a drive found again after it was out of its owner's hands, whose file anyone could have rewritten. Opening it means parsing its pages and its schema and walking its whole hash chain, and SQLite's own guidance treats a database file from an untrusted source as an attack surface. Under the database account, a fault that a crafted database reaches gives that account, not root. This is privilege separation in the manner of OpenSSH: the complex parsing of untrusted input runs unprivileged, and the privileged program does a few simple things with what it is told.
+      </p>
+
+      <p>
+        The database account is to own <RT·code>/var/lib/Account-Tree</RT·code>, where the system database is, and on each storage the Account-Tree directory's <RT·code>database/</RT·code> directory. Its interpreter is to open the databases with SQLite's defensive settings, <RT·code>trusted_schema</RT·code> off among them.
       </p>
 
       <h2>Who is asking</h2>
 
       <p>
-        The server learns the requesting account from the kernel. After a client connects, the server reads the <RT·code>SO_PEERCRED</RT·code> socket option, which gives the process id, uid and gid the kernel recorded for the client when it called <RT·code>connect</RT·code>. The client does not send them, so it cannot misstate them. The server authorizes by the uid and never by the process id, because process ids are reused. The uid gives the system account's name, and that name is the prefix of any child account the account makes.
+        The request gate records the gate invoking account, its real uid, for its guard and interpreter, as every Man-In-Grey gate does; the account cannot misstate it. Every account a request names is the gate invoking account or an account below it, whose name begins with the gate invoking account's name and the middle dot. At the record gate the gate invoking account is root, and the journal names the requesting account as an argument. The record guard trusts that argument because the account that gave it is root, which could do anything anyway; its constraints allow only root to give it journals.
+      </p>
+
+      <h2>The request language</h2>
+
+      <p>
+        The request language is made of requests, not of the primitive steps that carry them out. A journal that asked for a system uid to be made, or a path to be mounted, would leave the guard to work out what request the steps add up to, and to check every uid and path the composer chose against records it would have to consult again. A request names the work, and the uids, paths and mount options are the interpreter's to choose; none of them can be expressed in the language.
       </p>
 
       <p>
-        The requesting account is named in every journal the server composes for the request. A journal interpreter sees the server's account as the orchestrator account, and accepts a requesting account named in a journal only because the server's account is listed in <RT·code>relay_account</RT·code>, in constraints root owns. So the decision about who asked rests on the kernel at the socket, and the decision about what is allowed rests on the journal interpreter's constraints.
-      </p>
-
-      <h2>Requests</h2>
-
-      <p>
-        Each request is checked, recorded as a database transaction, carried out through journals, and answered. An account is allowed to act on itself and on any account in the tree below it, with the authority of the requesting account; this is how a child account's window, opened from its parent's, acts with the parent's authority.
-      </p>
-
-      <ul>
-        <li><RT·code>make</RT·code> &lt;short name&gt;: make a child account of the requesting account. Checks: the short name is valid and not in use; the requesting account's limit, and the limit of every account above it in its tree, allow one more. The child account is made in the storage database of the requesting account unless another attached storage is named. Steps: a database uid, never given before, and the account row in the storage database; a system uid, never given before, and the row in the system map; the system account; the home in <RT·code>account-data</RT·code>, owned by the database uid, mode 0700; the mount of it at <RT·code>/home/&lt;name&gt;</RT·code>; the parent's view.</li>
-        <li><RT·code>rename</RT·code> &lt;account&gt; &lt;new short name&gt;: rename a child account. The account, and every account below it, whose names begin with its name, must have no session; all are renamed together. The uids and files do not change; the homes, mount points and views are renamed with them.</li>
-        <li><RT·code>deprecate</RT·code> &lt;account&gt;: end the account's sessions, lock it, and mark it deprecated. Its data, name and uid are kept. It still counts against the limits. A deprecated account can be restored.</li>
-        <li><RT·code>deallocate</RT·code> &lt;account&gt;: remove a deprecated account. Its system account and views are removed, and its database uid and system uid are retired. What becomes of its data is open: the proposal is to move it to a holding directory on the storage, from which only the administrator removes it.</li>
-        <li><RT·code>view</RT·code> [&lt;account&gt;]: report an account and its tree: names, states, storage, and whether each is mounted. Changes nothing.</li>
-        <li><RT·code>set views</RT·code>: mount the requesting account's views of its child accounts that are on attached storage. Views already mounted are left as they are.</li>
-        <li><RT·code>enter</RT·code> &lt;account&gt; [&lt;program&gt;]: start a session, or a program, in an account below the requesting account.</li>
-        <li><RT·code>reconcile</RT·code>: compare the databases with <RT·code>/etc/passwd</RT·code> and the mount table, complete what an interrupted request left undone, make again any system account lost from <RT·code>/etc/passwd</RT·code>, and report what differs. Run at start and on demand. Administrator only.</li>
-      </ul>
-
-      <p>
-        The administrator's commands are not requests. <RT·code>Account-Tree_admin</RT·code> runs under root, so it can change the system directly, but it composes the same journals and hands them to the same journal interpreters, with root as the orchestrator account and no requesting account named. The code that changes the system then lives in one place, the journal interpreters, and the constraints catch the administrator's mistakes as they catch the server's. Making accounts the same, attaching, detaching and setting limits work while the server is stopped, at boot for instance. The server and <RT·code>Account-Tree_admin</RT·code> both write the databases; SQLite's lock lets one transaction in at a time.
-      </p>
-
-      <h2>Command languages and constraints</h2>
-
-      <p>
-        Each bespoke journal interpreter accepts one command language, and its guard refuses a whole journal when any command in it breaks a constraint. Every constraint is checked against the system database, which the journal interpreters read, and against the system itself. None of them trusts the server's account of what the records say.
+        Each request acts on the requesting account or on an account in the tree below it, with the authority of the requesting account; this is how a child account's window, opened from its parent's, acts with the parent's authority. Each has a result, which the person's program shows. The definition is <RT·code>Request·Language.py</RT·code>.
       </p>
 
       <ul>
-        <li><em>Account.</em> Commands: make a system account with a given name and system uid; delete a system account; delete its group. Constraints: the name is a valid account name; a new system uid lies in Account-Tree's range and appears in no row of the system map; a system account is deleted only when the system map records that Account-Tree made it. Edits <RT·code>/etc/passwd</RT·code>, <RT·code>/etc/shadow</RT·code>, <RT·code>/etc/group</RT·code> and <RT·code>/etc/gshadow</RT·code>.</li>
-        <li><em>Home.</em> Commands: make a storage account's home in <RT·code>account-data</RT·code>, owned by its database uid, mode 0700; delete a home and its files. Constraints: the tree dir holds a storage database whose database uuid the system database knows, and the storage account exists there with that database uid; a home is deleted only during the deletion of its storage, or of a deallocated account.</li>
-        <li><em>Mount.</em> Commands: make and delete a mount point; mount and unmount a home; mount and unmount a view. Constraints: a home is mounted only from <RT·code>&lt;tree dir&gt;/account-data/&lt;storage account&gt;</RT·code> onto <RT·code>/home/&lt;system account&gt;</RT·code>, where a row of the system map in use pairs the two, with that row's uid translation; a view is mounted only of a child account's home, at <RT·code>~/account_child/&lt;short name&gt;</RT·code> of its parent; every mount is <RT·code>nosuid</RT·code> and <RT·code>nodev</RT·code>; a mount point is an empty directory owned by root with mode 0000, made and deleted only at <RT·code>/home/&lt;system account&gt;</RT·code>.</li>
-        <li><em>Session.</em> Commands: start a session, or a program, in an account. Constraint: the requesting account is above the account in the tree.</li>
+        <li><RT·code>enter</RT·code>(account_name, display, terminal_type, &gt;session): start a login session of an account below the requesting account, on a new terminal. display names the requesting account's display: <RT·code>DISPLAY</RT·code>, the Wayland socket's absolute path and the X authority file's absolute path, each empty where there is none. terminal_type is the <RT·code>TERM</RT·code> the session is given. Result: session, holding the terminal's master side, a descriptor. Described under Login and entering.</li>
+        <li><RT·code>make_child_account</RT·code>(account_name, &gt;made): make account_name, whose parent, the name before its last middle dot, is the requesting account or an account below it, active, and not the system account of a branch, on the parent's storage. Steps: a database uid, never given before, and the account row in the storage database; a system uid, never given before, and the row in the system map; the system account; the home in <RT·code>account-data</RT·code>, owned by the database uid, mode 0700; the mount of it at <RT·code>/home/&lt;name&gt;</RT·code>. Result: made, the account's name, database uid and system uid.</li>
+        <li><RT·code>deallocate</RT·code>(account_name): remove an account below the requesting account, with no account below it that is not deallocated. Its processes are ended and its home unmounted; its system account is deleted, with the files it left in <RT·code>/tmp</RT·code>, <RT·code>/var/tmp</RT·code> and <RT·code>/dev/shm</RT·code>; its uids are retired; its rows in <RT·code>account_setting</RT·code> and <RT·code>account_share</RT·code> are deleted; and its home is moved to <RT·code>account-deallocated</RT·code>. An account whose parent is not in its storage database, which includes every login account, is not deallocated through the gate.</li>
+        <li><RT·code>share_with</RT·code>(account_name, list__account_name) and <RT·code>share_remove</RT·code>(account_name, list__account_name): make or end the shares of account_name with each account of the list. Every account named is the requesting account or below it, all of one storage database, and no member is account_name itself. Described under Share.</li>
+        <li><RT·code>sound_show</RT·code>, <RT·code>sound_permit_issue</RT·code>, <RT·code>sound_permit_revoke</RT·code>, <RT·code>sound_connection_set</RT·code>, <RT·code>sound_connection_reset</RT·code>, <RT·code>sound_bus_set</RT·code>, <RT·code>sound_bus_remove</RT·code> and <RT·code>sound_route_show</RT·code>: the sound of a tree, its buses, permits and connection tables, and what a router is to do. Described in <RT·code>design_audio.html</RT·code>; implemented in <RT·code>Sound.py</RT·code>, whose checks the guard calls.</li>
       </ul>
 
       <p>
-        Each command language needs a different part of root's rights: the account language to write files in <RT·code>/etc</RT·code>, the mount language to mount, the session language to change uid. Separate journal interpreters let each hold only its own part, as Man-In-Grey's design on least privilege describes.
+        The earlier form of this design had <RT·code>deprecate</RT·code>, which locked an account and kept it, counted against the limits, until it was deallocated or restored. It is dropped from this version as more than it is worth: an account goes from active to deallocated, and the deallocated home is kept on the storage for the administrator. <RT·code>view</RT·code> and <RT·code>set_views</RT·code> went with views. Still to come are <RT·code>rename</RT·code>, which renames an account and every account below it together, while none has a session; and the transfer requests.
+      </p>
+
+      <p>
+        <RT·code>reconcile</RT·code>, which is to compare the databases with <RT·code>/etc/passwd</RT·code> and the mount table, complete what an interrupted request left undone, make again any system account lost from <RT·code>/etc/passwd</RT·code>, and report what differs, is to be an instruction of the administrator's language, run at boot and on demand. It is not yet written.
+      </p>
+
+      <h2>Storage the gate reaches</h2>
+
+      <p>
+        A request acts on an account whose storage database the interpreter can find, and <RT·code>Request·Record.storage_database__of</RT·code> looks in two places: the mount point of each registered removable storage carrying that database, and <RT·code>/</RT·code>, the disk the system runs from. A storage attached by hand at another root, an archive for instance, is attached and mounted, but no request reaches its accounts; the administrator acts on them with <RT·code>Account-Tree_admin</RT·code>.
+      </p>
+
+      <h2>A request's course</h2>
+
+      <p>
+        For <RT·code>make_child_account</RT·code>, in the code as it stands:
+      </p>
+
+      <ol>
+        <li>The person's program expands the account name against its current account, composes a journal of the one request, makes a socket pair, and invokes the request gate with one end of it as descriptor 3. <RT·code>Request·Composer.py</RT·code> does this, for the commands and the window alike.</li>
+        <li>The request guard approves it, in four sets of checks: the journal is well formed against the language's definition; its literals have their forms, and an account to be made has a parent; the constraints at the top of <RT·code>Request·Guard.py</RT·code> hold; and the records allow it. For the last, <RT·code>Request·Record.py</RT·code> opens the system database and the storage databases read only and finds that the gate invoking account is an account a person uses, kept by Account-Tree, that the parent is that account or below it and active, that the name is free, and that the limit of the parent and of every account above it allows one more. For <RT·code>enter</RT·code> a fifth set checks the display on the file system.</li>
+        <li>The request interpreter makes the account, under the lock that also keeps plug and unplug apart: the database uid and the system uid, each given out within its database's write transaction, the system account, the home, the mount point and the mount.</li>
+        <li>The interpreter writes the result, and the gate forwards it to the program, which reads it with <RT·code>Man_In_Grey.admit</RT·code>, and shows it.</li>
+      </ol>
+
+      <p>
+        A refusal, for a limit for instance, comes before anything on the system has changed, since the guard reads the records first. Under its lock the interpreter checks again that the parent is active and the name is free, but not the limits; State of the code lists this.
+      </p>
+
+      <p>
+        Once the record gate is built, step 3 divides: the request interpreter composes a journal for the record gate, naming the requesting account and the account to be made; the record interpreter checks the tree and the limits against the records, gives out the two uids, records the account and its intended state, and answers with the name, the two uids, and the series number and head hash of each transaction; and the request interpreter checks the answer, Answer check below, then makes the system account, the home, the mount point and the mount. The series numbers and head hashes in the answer are logged with the changes the request interpreter makes, so that every change to the system is tied to the database transaction that recorded it.
+      </p>
+
+      <h2>Interpreter output</h2>
+
+      <p>
+        Man-In-Grey's gate reads the interpreter's verdict from its standard output. The work functions the interpreter calls write their logs there too, as they do for <RT·code>Account-Tree_admin</RT·code>, so while it interprets, the request interpreter points its standard output at its standard error. The logs reach the person on the terminal, and the verdict line stays alone on standard output.
+      </p>
+
+      <h2>Giving out a uid</h2>
+
+      <p>
+        Each database gives out its own uids, and its write lock is what keeps two requests from being given the same one. The choice of the next uid is made inside the write transaction, opened with <RT·code>BEGIN IMMEDIATE</RT·code>, which takes the lock before anything is read; a uid chosen before the transaction opens could be chosen by two requests at once. The code as it stands chooses first and opens the transaction after, in <RT·code>Storage.account__make</RT·code> and in <RT·code>is-same-account</RT·code>. A request that makes a child account runs both under <RT·code>StoragePlug.Lock</RT·code>, a lock file, <RT·code>/run/Account-Tree/lock</RT·code>, that plug, unplug and every request that changes accounts or shares take, so two requests do not choose at once. The administrator's <RT·code>account make</RT·code> and <RT·code>is-same-account</RT·code> do not take it.
+      </p>
+
+      <p>
+        One check stays outside the lock: that no account made by hand already has the system uid. An account made with <RT·code>useradd</RT·code> between the record interpreter's choice and the request interpreter's <RT·code>useradd -u</RT·code> would hold it. <RT·code>useradd</RT·code> then fails rather than making a duplicate, the request fails, and since the system database recorded the uid first, <RT·code>reconcile</RT·code> finds the request half done.
+      </p>
+
+      <h2>Answer check</h2>
+
+      <p>
+        Once the record gate is built, the request interpreter is to trust the database account less than it trusts itself, so it checks each answer the way a guard checks a journal, against what it asked and against facts the database account cannot forge:
+      </p>
+
+      <ul>
+        <li>the account's name is the requesting account's name, the middle dot, and the short name asked for;</li>
+        <li>the system uid lies in the system's range and is held by no account in the system's account database, and the database uid lies in the band;</li>
+        <li>before a home is mounted, its owner on disk, read with <RT·code>stat</RT·code>, is the database uid the answer gives; the database account cannot enter <RT·code>account-data</RT·code>, so it cannot have arranged the owner.</li>
+      </ul>
+
+      <p>
+        The third check is the one that matters most. An answer that gave one account another's database uid would otherwise mount the second account's files as the first's.
+      </p>
+
+      <h2>Instruction language and constraint</h2>
+
+      <ul>
+        <li><em>Request</em>, at the request gate: the requests above. Guard: the journal is well formed; its literals have their forms; the constraints hold; the records allow the request, as listed under A request's course; and for <RT·code>enter</RT·code>, the display is one the asking account can use, Display passed down the tree below. The checks are listed at the top of <RT·code>Request·GuardCheck.py</RT·code>.</li>
+        <li><em>Record</em>, at the record gate, once built: the record work each request and each of the administrator's commands needs, such as allocating a child account, mapping a system account to a storage account, recording an attach or a detach, and reporting the tree. Guard: the journal is well formed; the gate invoking account is root.</li>
+        <li><em>Administrator</em>, at the administrator's gate, once built: <RT·code>system make</RT·code>, <RT·code>storage make</RT·code>, <RT·code>account make</RT·code>, <RT·code>is-same-account</RT·code>, <RT·code>attach</RT·code>, <RT·code>detach</RT·code>, <RT·code>limit set</RT·code>, <RT·code>reconcile</RT·code> and the others of <RT·code>Account-Tree_admin</RT·code>. Guard: the journal is well formed; the gate invoking account is root.</li>
+      </ul>
+
+      <p>
+        The constraints that limit what root's interpreters do with what they are told stay with them: a new system uid lies in Account-Tree's range and appears in no row of the system map; a system account is deleted only when the system map records that Account-Tree made it; a home is mounted only from <RT·code>&lt;storage root&gt;/home/Account-Tree/account-data/&lt;storage account&gt;</RT·code> onto <RT·code>/home/&lt;system account&gt;</RT·code>, with the uid translation of the row of the system map that pairs them; every mount is <RT·code>nosuid</RT·code> and <RT·code>nodev</RT·code>; a mount point is an empty directory owned by root with mode 0000, made and deleted only at <RT·code>/home/&lt;system account&gt;</RT·code>; a home is deleted only during the deletion of its storage, and a deallocated account's home is moved, not deleted.
+      </p>
+
+      <p>
+        A single request touches <RT·code>/etc/passwd</RT·code>, a home and a mount, so the request gate needs every part of root's rights those take, and the separate account, home, mount and session languages of the earlier form of this design are folded into it. The loss is small: the right to mount, <RT·code>CAP_SYS_ADMIN</RT·code>, is nearly root by itself. The account, home, mount and session code stays in separate modules, which the request interpreter imports.
       </p>
 
       <h2>Partial failure</h2>
 
       <p>
-        A request makes several changes. The journal for a request is approved whole before any command executes, so a request that breaks a constraint changes nothing on the system. A command can still fail while executing, after earlier commands succeeded. The databases record the intended state of each account, so such a failure leaves the intended state recorded and the system short of it; <RT·code>reconcile</RT·code> finishes the work or reports why it cannot. A request is complete only when the system matches the databases.
+        A request makes several changes. The journal for a request is approved whole before any instruction executes, so a request that breaks a constraint changes nothing on the system, and the record interpreter's refusals come before the request interpreter changes anything. A step can still fail while executing, after earlier steps succeeded. The databases record the intended state of each account, so such a failure leaves the intended state recorded and the system short of it; <RT·code>reconcile</RT·code>, once written, is to finish the work or report why it cannot. A request is complete only when the system matches the databases.
       </p>
 
-      <h2>Protocol</h2>
+      <h2>At boot</h2>
 
       <p>
-        A request is one JSON object on one line, carrying the protocol version, the request name, and its arguments. The answer is one JSON object on one line, carrying whether the request succeeded, its result, and on failure a message for a person to read.
-      </p>
-
-      <h2>The service unit</h2>
-
-      <p>
-        The server's systemd unit runs it with <RT·code>User=Account-Tree</RT·code>. Two kinds of systemd option must be left out, because each would quietly stop the journal interpreters from working:
+        <RT·code>attach</RT·code> and <RT·code>reconcile</RT·code> are to be run at boot, before logins are allowed, by a systemd unit that runs <RT·code>Account-Tree_admin</RT·code> under root. The unit is not yet written: the units <RT·code>system configure</RT·code> writes are those of plug and unplug, which plug a registered removable storage whose drive and key are present at boot, and the storage on the system's own disk is attached with <RT·code>Account-Tree_admin attach /</RT·code>. Two kinds of systemd option are to be left out of the boot unit, because each would quietly stop the work:
       </p>
 
       <ul>
-        <li>Options that give the service a mount namespace of its own, such as <RT·code>PrivateMounts</RT·code> or <RT·code>ProtectHome</RT·code>. The journal interpreters the server starts inherit its mount namespace, and a mount made there exists only for the service; no account ever sees it.</li>
-        <li><RT·code>NoNewPrivileges</RT·code>, and the options that imply it for a service not running under root. With it set, the kernel ignores the setuid bit and file capabilities of every program the service starts, so the gates run without privilege.</li>
+        <li>options that give the unit a mount namespace of its own, such as <RT·code>PrivateMounts</RT·code> or <RT·code>ProtectHome</RT·code>, since a mount made there exists only for the unit, and no account ever sees it;</li>
+        <li><RT·code>NoNewPrivileges</RT·code>, since with it set the kernel ignores the setuid bit of the record gate, and the record interpreter would run under root, opening the databases with root's rights.</li>
       </ul>
 
-      <h1>Limits</h1>
+      <h1>Limit</h1>
 
       <p>
-        Making a child account takes a database uid from a storage database, and a system uid and a system account from the system, and the system's are finite. Without a limit, one account could take all of them. Each system account has a limit on the number of accounts in its tree below it, counting accounts at every depth and counting deprecated ones. Limits are kept in the system database. The administrator sets them with <RT·code>Account-Tree_admin limit set</RT·code>. A system account with no limit set has a limit of 0, and cannot make child accounts.
+        Making a child account takes a database uid from a storage database, and a system uid and a system account from the system, and the system's are finite. Without a limit, one account could take all of them. Each system account has a limit on the number of accounts in its tree below it, counting accounts at every depth. Limits are kept in the system database's <RT·code>account_limit</RT·code>, and the administrator sets them with <RT·code>Account-Tree_admin limit set</RT·code>. A system account with no limit set has the default limit, 100, <RT·code>System.LIMIT__DEFAULT</RT·code>; a limit of 0 allows it no child account.
       </p>
 
       <p>
-        A child account made by a child account counts against the limits of every account above it. The starting value suggested for a login account is 100.
+        An account made below a child account counts against the limit of every account above it, so a login account's limit bounds its whole tree, and a limit set on a child account bounds that part of it.
       </p>
 
-      <h1>Mounts</h1>
+      <h1>Mount</h1>
 
-      <h2>Idmapped mounts</h2>
+      <h2>Idmapped mount</h2>
 
       <p>
-        Every Account-Tree mount is an idmapped mount: a bind mount that carries a translation of uids, applied by the kernel to every permission check and to every file made through it. Idmapped mounts need Linux 5.12 or later, and a file system that supports them, such as ext4, btrfs or xfs. An idmapped mount is kernel state, with no process behind it, so it survives the restart of the server and the end of any session. A mount through FUSE, such as bindfs, does neither.
+        Every Account-Tree mount is an idmapped mount: a bind mount that carries a translation of uids, applied by the kernel to every permission check and to every file made through it. Idmapped mounts need Linux 5.12 or later, and a file system that supports them, such as ext4, btrfs or xfs. An idmapped mount is kernel state, with no process behind it, so it survives the end of the program that made it and of any session. A mount through FUSE, such as bindfs, does neither.
       </p>
 
       <p>
-        The mount journal interpreter makes the mount with the kernel's own calls, not by running <RT·code>mount</RT·code>. <RT·code>open_tree</RT·code> clones the source as a mount not yet attached anywhere; <RT·code>mount_setattr</RT·code> gives it <RT·code>nosuid</RT·code>, <RT·code>nodev</RT·code> and the idmap; <RT·code>move_mount</RT·code> places it. The kernel is given the idmap as a user namespace: a child process is made in a new user namespace, its uid and gid maps are written, and the namespace is handed to <RT·code>mount_setattr</RT·code>. A map line reads <RT·code>&lt;id inside&gt; &lt;id outside&gt; &lt;count&gt;</RT·code>; for an idmapped mount the kernel takes the uid on disk, the database uid, as the id inside, and the id outside, the system uid, as the uid seen through the mount.
+        The request interpreter, and the administrator's, make the mount with the kernel's own calls, not by running <RT·code>mount</RT·code>. <RT·code>open_tree</RT·code> clones the source as a mount not yet attached anywhere; <RT·code>mount_setattr</RT·code> gives it <RT·code>nosuid</RT·code>, <RT·code>nodev</RT·code> and the idmap; <RT·code>move_mount</RT·code> places it. The kernel is given the idmap as a user namespace: a child process is made in a new user namespace, its uid and gid maps are written, and the namespace is handed to <RT·code>mount_setattr</RT·code>. A map line reads <RT·code>&lt;id inside&gt; &lt;id outside&gt; &lt;count&gt;</RT·code>; for an idmapped mount the kernel takes the uid on disk, the database uid, as the id inside, and the id outside, the system uid, as the uid seen through the mount.
       </p>
 
       <h2>Attaching storage</h2>
 
       <p>
-        <RT·code>Account-Tree_admin attach &lt;tree dir&gt;</RT·code> verifies the storage database's standards and hash chain, compares its record with the heads seen here, as described under Copies and branches, then reads this system's map for the rows naming that database uuid, and nothing else. For each, it checks that the storage account is active and that the system account exists with its system uid and with its home at <RT·code>/home/&lt;system account&gt;</RT·code>, and mounts the storage account's home there, translating the database uid to the system uid. Storage accounts with no row are logged as skipped. The mounts are <RT·code>nosuid</RT·code> and <RT·code>nodev</RT·code>, since a storage can carry set-user-id programs and device files. Files on the storage owned by database uids the mount does not translate appear owned by <RT·code>nobody</RT·code>.
+        <RT·code>Account-Tree_admin attach &lt;dirp_storage&gt;</RT·code> verifies the storage database's standards and hash chain, compares its record with the heads seen here, as described under Copy and branch, then reads this system's map for the rows naming that database uuid, and nothing else. For each, it checks that the storage account is active and that the system account exists with its system uid and with its home at <RT·code>/home/&lt;system account&gt;</RT·code>, and mounts the storage account's home there, translating the database uid to the system uid; where the database uid, system uid and gid are one number, as for an account brought in keeping its uid, the mount is a plain bind mount. Storage accounts with no row are logged as skipped. The mounts are <RT·code>nosuid</RT·code> and <RT·code>nodev</RT·code>, since a storage can carry set-user-id programs and device files. Files on the storage owned by database uids the mount does not translate appear owned by <RT·code>nobody</RT·code>.
       </p>
 
-      <h2>Views</h2>
-
       <p>
-        A parent account sees each of its child accounts at <RT·code>~/account_child/&lt;short name&gt;</RT·code>: an idmapped mount of the child account's home that translates the child's uid to the parent's. Files there appear to be the parent's, and files the parent makes there belong to the child. The directory is named for the property each of its entries has, being a child account, so the name is singular. Views are set when storage is attached, for the parent accounts already in session, and at each session's start, through <RT·code>set views</RT·code>. Views are designed in outline only, and come next after this document's other parts are built.
+        Before it mounts anything, attach makes again the system accounts unplug deleted, for the rows of the system map marked unplugged, each with the next free system uid, and puts the rows back in use. A system account made again is given the password, shell and aging of its <RT·code>account_setting</RT·code> row, or, where there is no row, what this system saved in <RT·code>system_account__saved</RT·code>; its supplementary groups outside the storage come from what this system saved, since an administrator gives those on each system. Attach then makes the shares of <RT·code>account_share</RT·code>, through <RT·code>Share.share__apply</RT·code>: each member is added to the own group of the account sharing with it. A membership this system saved at unplug, in the own group of an account of the same storage, is not made again from the saved copy, since the storage database is the authority for it; one with no row in <RT·code>account_share</RT·code> is reported. <RT·code>Account-Tree_admin share record</RT·code> writes a system's memberships into the table, once, for a storage whose shares were made before the table existed.
       </p>
 
-      <h2>Mount points</h2>
+      <h2>Plug and unplug</h2>
 
       <p>
-        A mount point must exist before a mount, so <RT·code>/home/&lt;system account&gt;</RT·code> exists for every known account, attached or not. While nothing is mounted on it, it is an empty directory owned by root with mode 0000, and marked immutable. No account can enter it, and nothing can be written into it to be hidden later by the mount.
+        A removable storage is a LUKS2 partition opened by a FIDO2 key. <RT·code>Account-Tree_admin storage register</RT·code> records it in <RT·code>storage_device</RT·code> while it is unlocked and mounted: its LUKS uuid, the storage database it carries, its storage name and its mount point. <RT·code>system configure</RT·code> writes the systemd units and the udev rule, <RT·code>/etc/udev/rules.d/90-Account-Tree.rules</RT·code>, that do the rest:
+      </p>
+
+      <ul>
+        <li>a registered partition arriving starts <RT·code>Account-Tree_plug@&lt;kernel name&gt;.service</RT·code>, bound to the partition's device unit, which runs <RT·code>storage plug</RT·code>, and runs <RT·code>storage unplug</RT·code> when the drive goes;</li>
+        <li>a FIDO2 key arriving starts <RT·code>Account-Tree_key-arrive.service</RT·code>, which runs <RT·code>storage plug all</RT·code>, for a drive that arrived before its key;</li>
+        <li>a key that unlocked a storage has <RT·code>Account-Tree_key@hidrawN.service</RT·code> started for it, bound to the key's device unit, whose stop, when the key is pulled out, runs <RT·code>storage unplug key</RT·code>.</li>
+      </ul>
+
+      <p>
+        Plug offers the LUKS2 header to each key present, one at a time; a key that did not make the credential is passed over without a touch, and the key that did waits for its button. Plug then mounts the storage at its mount point, <RT·code>nosuid,nodev</RT·code>, records what it did in <RT·code>/run/Account-Tree/plugged/&lt;storage name&gt;.json</RT·code>, attaches it, and offers its login accounts on the login screen through AccountsService. A child account is always hidden from the login screen, since it is entered from its parent. <RT·code>storage plug</RT·code> given <RT·code>passphrase</RT·code> asks for the passphrase on the terminal instead, and watches no key.
+      </p>
+
+      <p>
+        Unplug ends every process of the storage's accounts, whoever is at the console, and writes each account's setting into <RT·code>account_setting</RT·code> while the storage can still be read. It unmounts the homes, records the detach, and for each system account Account-Tree made: keeps what the account has that the storage does not carry in <RT·code>system_account__saved</RT·code>, deletes the system account, its own group and its mount point, deletes the files it owns in <RT·code>/tmp</RT·code>, <RT·code>/var/tmp</RT·code> and <RT·code>/dev/shm</RT·code> and those named for it in <RT·code>/var/spool/mail</RT·code>, <RT·code>/var/spool/cron</RT·code>, <RT·code>/var/lib/systemd/linger</RT·code> and AccountsService's directories, and marks its row of the system map unplugged, which frees its system uid. It hides adopted accounts, which stay, from the login screen, unmounts and locks the storage, and powers the drive off with <RT·code>udisksctl</RT·code>, so that the drive's light going out says it is safe to pull. The next plug, on this system or another, makes the system accounts again with the next free system uids. Unplug refuses to run from a shell whose working directory is on the storage, since it would end that shell.
+      </p>
+
+      <h2>Mount point</h2>
+
+      <p>
+        A mount point must exist before a mount. Attach makes <RT·code>/home/&lt;system account&gt;</RT·code> where it is absent: an empty directory owned by root with mode 0000, and marked immutable, through the <RT·code>FS_IOC_SETFLAGS</RT·code> ioctl. No account can enter it while nothing is mounted on it, and nothing can be written into it to be hidden later by the mount. Detach keeps it. It is deleted, recognized by that form, when the system account goes: at unplug, at <RT·code>is-not-same-account</RT·code>, at deallocation and at <RT·code>storage delete</RT·code>. Attach refuses to mount over a directory there that holds anything.
       </p>
 
       <h1>Login and entering</h1>
@@ -545,58 +696,191 @@
       </p>
 
       <p>
-        An account below a login account is entered through its parent: the parent sends the server an <RT·code>enter</RT·code> request, and the server composes a journal for the session journal interpreter, whose constraint allows the session only when the requesting account is above the account in the tree. Whether such an account is ever to be entered through the login programs as well is open.
+        <RT·code>home_present</RT·code> is not yet written. In the code as it stands, unplug deletes the system accounts Account-Tree made, so no login finds their empty mount points; an adopted account is hidden from the login screen while its storage is out, and a child account always is. The check remains needed for an adopted account at the console and through ssh, and for a child account, which has no password but is reachable by <RT·code>su</RT·code> from root.
       </p>
 
       <p>
-        A session, when it starts, sends <RT·code>set views</RT·code>. The server knows the account from the socket, so a session can set only its own views.
+        An account below a login account is entered from an account above it, with <RT·code>Account-Tree enter &lt;account&gt;</RT·code>, which gives an <RT·code>enter</RT·code> request to the request gate. The guard allows it when the account is below the gate invoking account, active, and has its home mounted, and when the display the request names is one the asking account can use. The interpreter then:
       </p>
 
-      <h1>Programs and modules</h1>
+      <ol>
+        <li>gives the account the display: an ACL entry on the Wayland socket and search on its directory, with <RT·code>setfacl</RT·code>; and for X, <RT·code>xhost +SI:localuser:&lt;account&gt;</RT·code>, run under the asking account, whose X server it is;</li>
+        <li>opens a terminal pair with <RT·code>openpty</RT·code>, and gives the terminal's slave side to the account, mode 0620;</li>
+        <li>has systemd start the session as a transient service, so the session belongs to systemd and not to the interpreter;</li>
+        <li>returns the master side, as the descriptor of the session result.</li>
+      </ol>
+
+      <RT·code>
+        systemd-run --quiet --collect --unit=Account-Tree_enter-&lt;uid&gt;-&lt;hex&gt; --service-type=exec
+          --uid=&lt;uid&gt; --gid=&lt;gid&gt; --property=PAMName=login --property=TTYPath=&lt;slave&gt;
+          --property=StandardInput=tty --property=StandardOutput=tty --property=StandardError=tty
+          --property=TTYReset=yes --property=TTYVHangup=yes --property=WorkingDirectory=~
+          ... &lt;the account's login shell&gt;
+      </RT·code>
+
+      <p>
+        <RT·code>PAMName=login</RT·code> opens a PAM session for the service, through which <RT·code>pam_systemd</RT·code> registers a login session of the account and starts its runtime directory and its systemd <RT·code>--user</RT·code> instance, so the account runs its own services, its sound service among them. The gate waits for its interpreter's verdict, so the interpreter cannot be the session itself; with the service started, it returns. The asking program, through <RT·code>Terminal.relay</RT·code>, puts its own terminal in raw mode and relays it to the master side until the session's shell ends, passing on changes of window size. The session runs in the terminal the person typed the command in, and every program started from its shell runs under the entered account.
+      </p>
+
+      <h2>Display passed down the tree</h2>
+
+      <p>
+        An account that was entered can enter an account below it, with the display it was given. The guard accepts a Wayland socket or an X authority file that is reached through no symbolic link, is of the right kind, the socket in its owner's runtime directory, is owned by the asking account or by an account above it in the tree, and is usable by the asking account. Usable is checked by a process forked with the asking account's uids calling <RT·code>access</RT·code>, since root's own check would always pass. An account above the asking account made the display usable to it by entering it, so a child account is given no more of a display than its parent has.
+      </p>
+
+      <p>
+        Whether such an account is ever to be entered through the login programs as well is open.
+      </p>
+
+      <h1>Share</h1>
+
+      <p>
+        An account shares its files with another by giving them to its own group, and making the other account a member of that group. Every group Account-Tree shares is the own group of an account. A group with an identity apart from any account is not needed: an account made to hold what is shared, as <RT·code>Thomas·incommon</RT·code> is, serves the purpose, and its files, its limits and its place in the tree come with it.
+      </p>
+
+      <RT·code>
+        Account-Tree share &lt;account&gt; with &lt;account&gt; ...
+        Account-Tree share &lt;account&gt; remove &lt;account&gt; ...
+        Account-Tree share &lt;account&gt; list
+      </RT·code>
+
+      <p>
+        <RT·code>with</RT·code> and <RT·code>remove</RT·code> are the requests <RT·code>share_with</RT·code> and <RT·code>share_remove</RT·code>. The interpreter writes the share into <RT·code>account_share</RT·code> and changes the group on this system, so the share holds on every system the storage is plugged into, made again at each attach. <RT·code>list</RT·code> reads <RT·code>/etc/group</RT·code>, and prints the shares made on this system. A share between accounts of two storage databases is not recorded, since neither database could make it alone.
+      </p>
+
+      <h1>Transfer</h1>
+
+      <p>
+        To be built. A parent account reaches a child account's files by a transfer: a list, a copy or a move between two accounts the asking account is above, or between it and one of them. A transfer is a request. The interpreter starts a reader under the source account and a writer under the target account, joined by a pipe, so every file is read with the source's rights and made by the target, which owns it, and root writes no file on either side. The window shows a transfer's progress in a dialog. A file of a child account is opened the same way, by a program started under that account.
+      </p>
+
+      <p>
+        Views were set aside for this. A view makes a child account's files the parent's to every program the parent runs, which undoes the separation the child account exists for; a symbolic link in the child's home is followed with the parent's rights, unless every view is mounted <RT·code>nosymfollow</RT·code>; and the mounts multiply with the tree, each to be set at each session. A reader and a writer under the two accounts need no mount, and the kernel checks each side with that side's own rights.
+      </p>
+
+      <h1>Sound</h1>
+
+      <p>
+        Sound reaches the accounts of a tree through buses in the login account's PipeWire, the hub, which holds the sound devices. The system issues a login account a grant of sound with <RT·code>Account-Tree_admin sound grant issue</RT·code>; the login account issues permits for bus ends and devices down its tree; each account's connection table names which of its programs go to which bus end. An account reaches a bus end through a FIFO in <RT·code>/run/Account-Tree/bus/</RT·code>, made for it alone, so no account can listen to another except where a permit issued above it lets it. <RT·code>/run/Account-Tree</RT·code> is therefore mode 0711, so accounts pass through it by name. The whole design, and what of it is built, is in <RT·code>design_audio.html</RT·code>; the code is <RT·code>Sound.py</RT·code>.
+      </p>
+
+      <h1>Program and module</h1>
 
       <ul>
-        <li><RT·code>Account-Tree</RT·code>: the person's program. Its commands send requests to the server; its <RT·code>window</RT·code> command opens the resource window, which shows the account's child accounts and their states and sends the same requests. Runs as the person's account.</li>
-        <li><RT·code>Account-Tree_server</RT·code>: the server, started by its systemd unit as the account <RT·code>Account-Tree</RT·code>. Nobody types it.</li>
-        <li><RT·code>Account-Tree_admin</RT·code>: the administrator's program. Root. Its commands: <RT·code>system make</RT·code>, <RT·code>system show</RT·code> and <RT·code>system delete</RT·code>; <RT·code>storage make</RT·code>, <RT·code>storage show</RT·code> and <RT·code>storage delete</RT·code>, each given a tree dir; <RT·code>account make</RT·code>; <RT·code>is-same-account</RT·code>, <RT·code>is-not-same-account</RT·code>, <RT·code>same-account show</RT·code> and <RT·code>same-account suggest</RT·code>; <RT·code>attach</RT·code> and <RT·code>detach</RT·code>; and <RT·code>limit set</RT·code>. At boot, before logins are allowed, <RT·code>attach</RT·code> is run for every storage present, the disk inside the machine included, so that <RT·code>/home</RT·code> is populated. Detaching is refused while a system account it would unmount has a session. Unlocking an encrypted storage and mounting it come later.</li>
-        <li>The bespoke journal interpreters, one for each command language, account, home, mount and session, each a compiled gate followed by a guard and Man-In-Grey's general interpreter. Installed owned by root, in directories only root can write.</li>
-        <li><RT·code>home_present</RT·code>: the PAM check.</li>
-        <li>The schema and initialization scripts.</li>
+        <li><RT·code>Account-Tree</RT·code>: the person's program, run under the person's account. Its commands: <RT·code>window</RT·code> and <RT·code>list</RT·code>, given an account; <RT·code>resource</RT·code>; <RT·code>current</RT·code>; <RT·code>enter</RT·code>; <RT·code>account make child</RT·code> and <RT·code>account deallocate</RT·code>, the second asking for the account's full name to be typed unless <RT·code>confirmed</RT·code> is given; and <RT·code>share with</RT·code>, <RT·code>share remove</RT·code> and <RT·code>share list</RT·code>; and <RT·code>sound show</RT·code>, <RT·code>sound permit</RT·code>, <RT·code>sound connection</RT·code> and <RT·code>sound bus</RT·code>. <RT·code>list</RT·code> and the window read the tree from the names of the system accounts in <RT·code>/etc/passwd</RT·code>, through <RT·code>AccountTree.py</RT·code>, which needs no privilege.</li>
+        <li><RT·code>Account-Tree_admin</RT·code>: the administrator's program, run under root. Its commands: <RT·code>system make</RT·code>, <RT·code>system show</RT·code>, <RT·code>system delete</RT·code> and <RT·code>system configure</RT·code>; <RT·code>storage make</RT·code>, <RT·code>storage show</RT·code> and <RT·code>storage delete</RT·code>, each given a storage's root; <RT·code>storage register</RT·code>, <RT·code>storage unregister</RT·code>, <RT·code>storage plug</RT·code> and <RT·code>storage unplug</RT·code>; <RT·code>account make</RT·code> and <RT·code>account deallocate</RT·code>; <RT·code>is-same-account</RT·code>, <RT·code>is-not-same-account</RT·code>, <RT·code>same-account show</RT·code> and <RT·code>same-account suggest</RT·code>; <RT·code>attach</RT·code> and <RT·code>detach</RT·code>; <RT·code>limit set</RT·code>; <RT·code>share record</RT·code>; and <RT·code>sound grant issue</RT·code>, <RT·code>sound grant revoke</RT·code> and <RT·code>sound grant show</RT·code>. Detaching is refused while a system account it would unmount has a session.</li>
+        <li><RT·code>Account-Tree_install</RT·code> and <RT·code>Account-Tree_teardown</RT·code>: install and remove the programs, the gate and the modules.</li>
+        <li>The request gate, <RT·code>Account_Tree__Gate·Request</RT·code>, built by <RT·code>Account_Tree__Gate.make</RT·code> from Man-In-Grey's gate library, with its guard and interpreter.</li>
+        <li><RT·code>home_present</RT·code>: the PAM check, to be written.</li>
+        <li>The schemas, <RT·code>schema_storage.sql</RT·code> and <RT·code>schema_system.sql</RT·code>. A table added to a schema with <RT·code>CREATE TABLE IF NOT EXISTS</RT·code> is added to a database that lacks it when the database is opened.</li>
       </ul>
 
       <p>
-        Each program keeps the RT convention of a command line interface apart from its work functions, and the modules are imported as libraries: a window, a server or a test calls the functions directly, never the command line. There are three layers, and two boundaries between them. The person's functions send requests to the server and return its replies; <RT·code>Account-Tree</RT·code> and the window import them. The socket between the person and the server is where authority is decided: the server learns who asked and what that account is allowed. The server's functions keep the records and compose journals; the server and <RT·code>Account-Tree_admin</RT·code> import them. The gate between the server and a journal interpreter is where privilege changes, and the guard decides, by the constraints, what the privilege is used for. The journal interpreters hold the functions that change the system.
+        Each program keeps the RT convention of a command line interface apart from its work functions, and the modules are imported as libraries. No function calls a command. A command packages its arguments, calls a work function, and formats what the function returns; the window calls the same work functions the commands call, and so does a test. For requests these are <RT·code>Request·Composer</RT·code>'s. A work function whose output is for a person, a log or a listing, writes it to the channel; one whose result another function has use for, an access function, returns it, and a single function prints such a list.
       </p>
 
       <p>
-        The modules are named and shaped as they are meant to stay. Where a direct call is not yet written, a wrapper function stands in its place, named for what it does here and commented with the direct call it will become:
+        There are two layers, and one boundary between them, the gate. The person's functions compose journals and invoke the gate; <RT·code>Account-Tree</RT·code> and the window import them. At the gate the kernel says who asks, privilege changes, and the guard decides, by the constraints and the records, what the privilege is used for. The interpreters hold the functions that change the system and the records.
+      </p>
+
+      <p>
+        The modules follow Man-In-Grey's naming: a module is a namespace, a file named for a namespace alone is its main module, and a file specific to it carries the namespace before a middle dot. The request language is a namespace whose files parallel Man-In-Grey's own:
+      </p>
+
+      <RT·code>
+        Request·Language.py              the request language's definition
+        Request·Guard.py                 its guard, with its constraints at its top
+        Request·GuardCheck.py            its checks for the guard
+        Request·Record.py                what the guard reads of the records, read only
+        Request·Interpreter.py           its interpreter
+        Request·LibraryInstruction.py    the implementation of its instructions
+        Request·Composer.py              the person's side: composing a request and invoking the gate
+      </RT·code>
+
+      <p>
+        The window, <RT·code>Window.py</RT·code>, is drawn with GTK 4, and today only shows. For the window account it has the panels Account, Authority and Control above, and Child account, Allocate and Allocated below. Child account lists the child accounts with their session state, read again every five seconds, and a button for each opens that account's window, acting with the first window's account. Allocated shows the home. Allocate lists the kinds of resource of <RT·code>ResourceKind.py</RT·code>. Every option that would change something has no action yet and is greyed out, and the Authority panel shows the answer of <RT·code>Authority.py</RT·code>, a stub that refuses every change. The window is to drop <RT·code>Authority.py</RT·code> and call <RT·code>Request·Composer</RT·code>, as the commands do.
+      </p>
+
+      <p>
+        The record language and the administrator's language are to have the same files, under <RT·code>Record·</RT·code> and <RT·code>Admin·</RT·code>. The code that does the work is in modules of its own, which the libraries of instructions and <RT·code>Account-Tree_admin</RT·code> import:
       </p>
 
       <ul>
-        <li><RT·code>kernel</RT·code>: direct calls, made through ctypes. The idmapped mount through <RT·code>open_tree</RT·code>, <RT·code>mount_setattr</RT·code> and <RT·code>move_mount</RT·code>; unmounting through <RT·code>umount2</RT·code>; the mount table from <RT·code>/proc/self/mountinfo</RT·code>; the immutable flag through the <RT·code>FS_IOC_SETFLAGS</RT·code> ioctl; login sessions through <RT·code>sd_get_uids</RT·code> in libsystemd. Its changing calls move into the mount journal interpreter; its reading calls stay available to the server.</li>
-        <li><RT·code>system_account</RT·code>: reading system accounts directly, through the C library, and changing them through wrappers, <RT·code>system_account__make</RT·code>, <RT·code>system_account__delete</RT·code> and <RT·code>system_group__delete</RT·code>, which run the shadow suite's commands for now. In the future each will be a direct call: the lines of <RT·code>/etc/passwd</RT·code>, <RT·code>/etc/shadow</RT·code>, <RT·code>/etc/group</RT·code> and <RT·code>/etc/gshadow</RT·code> edited under the C library's lock, <RT·code>lckpwdf</RT·code>, each new file written beside the old one and renamed into place. The changing calls move into the account journal interpreter.</li>
-        <li><RT·code>database</RT·code>, <RT·code>system</RT·code>, <RT·code>storage</RT·code> and <RT·code>same_account</RT·code>: the databases and the work functions on them, which compose journals where they now change the system directly.</li>
-        <li><RT·code>account_tree</RT·code>, <RT·code>authority</RT·code>, <RT·code>resource_kind</RT·code> and <RT·code>window</RT·code>: the person's side.</li>
+        <li><RT·code>AccountTree.py</RT·code>: the system accounts as a tree, read from their names, and the expansion of relative account names.</li>
+        <li><RT·code>ChildAccount.py</RT·code>: making and deallocating a child account.</li>
+        <li><RT·code>Share.py</RT·code>: making, ending, recording and applying shares.</li>
+        <li><RT·code>Sound.py</RT·code>: the sound of a tree: its buses, the permits and their marks, the connection tables, and the FIFOs between the hub and the accounts.</li>
+        <li><RT·code>Storage.py</RT·code>, <RT·code>StoragePlug.py</RT·code>, <RT·code>System.py</RT·code> and <RT·code>SameAccount.py</RT·code>: the storage databases and attach; plug and unplug, and the lock; the system database and limits; which accounts are the same account, and the settings carried between systems.</li>
+        <li><RT·code>Database.py</RT·code>: the two kinds of database, their hash chain and their schemas. Once the record gate is built, imported by the record interpreter only, so that no root process opens a database.</li>
+        <li><RT·code>SystemAccount.py</RT·code>: reading system accounts directly, through the C library, and changing them through wrappers that run the shadow suite's commands for now. In the future each is to be a direct call: the lines of <RT·code>/etc/passwd</RT·code>, <RT·code>/etc/shadow</RT·code>, <RT·code>/etc/group</RT·code> and <RT·code>/etc/gshadow</RT·code> edited under the C library's lock, <RT·code>lckpwdf</RT·code>, each new file written beside the old one and renamed into place.</li>
+        <li><RT·code>Kernel.py</RT·code>: direct calls, made through ctypes: the idmapped mount through <RT·code>open_tree</RT·code>, <RT·code>mount_setattr</RT·code> and <RT·code>move_mount</RT·code>, unmounting, the mount table, the immutable flag, and login sessions through libsystemd.</li>
+        <li><RT·code>Terminal.py</RT·code>: relaying a terminal to a session's master side.</li>
+        <li><RT·code>SystemConfiguration.py</RT·code> and <RT·code>AccountsService.py</RT·code>: the systemd units and udev rules for plug and unplug, and which accounts the login screen offers.</li>
+        <li><RT·code>Window.py</RT·code> and <RT·code>ResourceKind.py</RT·code>: the resource window and the kinds of resource it shows.</li>
+        <li><RT·code>Common.py</RT·code>: the log and what the other modules share.</li>
       </ul>
 
       <p>
-        In the code as it stands, <RT·code>Account-Tree_admin</RT·code> calls the changing functions directly, as root. Moving them into journal interpreters is the step that lets the server run without privilege. Keeping them small and their calls direct also lets them later be moved into the kernel, where an account tree with root at its top fits Linux as it is.
+        Where a direct call is not yet written, a wrapper function stands in its place, named for what it does here and commented with the direct call it will become. Keeping the changing functions small and their calls direct also lets them later be moved into the kernel, where an account tree with root at its top fits Linux as it is.
       </p>
 
-      <h1>Open questions</h1>
+      <h1>State of the code</h1>
+
+      <p>
+        The places where the code differs from the design, as of this document's date. Each is also noted where the text describes it.
+      </p>
+
+      <h2>Defect</h2>
 
       <ul>
-        <li>What deallocation does with an account's data.</li>
-        <li>When each Account-Tree journal interpreter moves from setuid root to only the capabilities its command language needs: <RT·code>CAP_SYS_ADMIN</RT·code> for the mount language, <RT·code>CAP_SETUID</RT·code> and <RT·code>CAP_SETGID</RT·code> for the session language, and the file capabilities for the account and home languages.</li>
-        <li>The names of the journal interpreter programs.</li>
+        <li><RT·code>storage delete</RT·code> refuses a storage that holds <RT·code>account-deallocated</RT·code>, reporting it as not Account-Tree's (<RT·code>Storage.storage__delete</RT·code>). It is to accept the directory and delete it only with <RT·code>delete-account-data</RT·code>.</li>
+        <li>The limits are counted only by the guard. Two <RT·code>make_child_account</RT·code> requests at the same moment can both pass the count and leave a tree one over its limit; the interpreter is to count again under <RT·code>StoragePlug.Lock</RT·code>.</li>
+        <li>The administrator's <RT·code>account make</RT·code> and <RT·code>is-same-account</RT·code> choose a uid before opening the transaction, and do not take <RT·code>StoragePlug.Lock</RT·code>, so one run beside a request can choose the uid the request chose. Taking the lock closes this; the choice is later to move inside the transaction.</li>
+      </ul>
+
+      <h2>Pending change</h2>
+
+      <ul>
+        <li>The window moves off <RT·code>Authority.py</RT·code> onto <RT·code>Request·Composer</RT·code>'s work functions, and <RT·code>Authority.py</RT·code> is removed.</li>
+        <li><RT·code>ChildAccount.child__make</RT·code> still takes <RT·code>list__group</RT·code>, from the group feature that shares replaced; the parameter goes.</li>
+        <li>Listings become access functions: <RT·code>share list</RT·code> and <RT·code>list &lt;account&gt;</RT·code> each get a function that returns the list, and one function prints a list. Logs stay written to the channel.</li>
+        <li>Stale text goes: the <RT·code>storage unplug</RT·code> help says passwords and groups are kept in the system database for the next plug, where the password, aging, comment and shell are now kept on the storage; the <RT·code>Account-Tree_admin</RT·code> help and <RT·code>AccountTree.py</RT·code>'s docstring speak of the Account-Tree server; the window's Control panel names the old <RT·code>subu_login</RT·code> and <RT·code>subu_sound</RT·code> scripts and offers deprecate; <RT·code>ResourceKind.py</RT·code> lists a view.</li>
+        <li><RT·code>AccountTree.READ_OLD_SEPARATOR</RT·code>, which splits a name on its last <RT·code>_</RT·code> for accounts that still carry the old separator, is removed once none do.</li>
+        <li>The handling of the state <RT·code>deprecated</RT·code> stays only as rows from an earlier version need it: attach does not mount such an account, and deallocation and the guard accept it.</li>
+      </ul>
+
+      <h2>Not yet built</h2>
+
+      <ul>
+        <li>The sound router and the window's Sound panel; see State of the code in <RT·code>design_audio.html</RT·code>.</li>
+        <li>Transfer, and opening a child account's file from the window.</li>
+        <li><RT·code>rename</RT·code>.</li>
+        <li>The database account, the record gate, the answer check and the administrator's gate; until then the request interpreter and <RT·code>Account-Tree_admin</RT·code> open the databases under root.</li>
+        <li><RT·code>reconcile</RT·code>, and the unit that attaches storage at boot.</li>
+        <li><RT·code>home_present</RT·code>, the PAM check.</li>
+        <li>The check at <RT·code>storage make</RT·code> that the file system stores 32-bit uids, and the check at attach for database uids that coincide with system uids in use.</li>
+        <li>The initialization scripts of the fallback tool.</li>
+        <li>Requests on accounts of a storage that is neither on <RT·code>/</RT·code> nor registered; see Storage the gate reaches.</li>
+      </ul>
+
+      <h1>Open question</h1>
+
+      <ul>
+        <li>Words for the login account and the current account in account names. <RT·code>.</RT·code> for the current account and <RT·code>..</RT·code> for its parent would read as they do in paths, and make those two short names reserved, where the middle dot alone now names root. For the login account, bash expands a bare <RT·code>~</RT·code> to a home directory before the program sees it, so <RT·code>~</RT·code> would have to be quoted, and another mark such as <RT·code>^</RT·code> avoids that.</li>
+        <li>A per-account view of the system: software installed for one account and seen by it alone, through a mount namespace or an overlay of <RT·code>/usr</RT·code>, so that installing needs no administrator.</li>
+        <li>Whether shares are ever to be made between accounts of different storage databases, and where such a share would be recorded.</li>
+        <li>When the request gate moves from setuid root to only the capabilities its requests need: <RT·code>CAP_SYS_ADMIN</RT·code> to mount, <RT·code>CAP_SETUID</RT·code> and <RT·code>CAP_SETGID</RT·code> for sessions, and the file capabilities for accounts and homes.</li>
+        <li>Whether Man-In-Grey is to provide for installing an application's tree beside its library. <RT·code>Account-Tree_install</RT·code> copies the Man-In-Grey modules it needs into its own tree for now.</li>
+        <li>Whether the record gate is a Man-In-Grey gate, as proposed, or the request interpreter instead starts a child that gives up root's uid for the database account's and answers on a pipe. The gate keeps the record work in the same form as every other change, logged and guarded; the child needs no setuid program.</li>
+        <li>A deadline for each gate, so that a hung interpreter, which the asking account cannot signal once the gate has isolated itself, does not hold a request until root ends it. Man-In-Grey lists it as a future feature.</li>
         <li>Whether an account below a login account is ever to be entered through the login programs as well.</li>
-        <li>Whether a parent account's views are removed when its last session ends, or left until the storage is detached.</li>
-        <li>How resources other than accounts and storage, such as network zones and devices, are recorded in the database.</li>
+        <li>How resources other than accounts, storage and sound, such as network zones, are recorded in the database.</li>
       </ul>
 
       <h1>Road map</h1>
 
       <p>
-        Standard 5.0 is the design above. Later standards add the following, each described in its own section. A database lists the standards it follows in its <RT·code>standard</RT·code> table, so a database moves to a later standard by listing it, and a program that follows only an earlier one refuses it.
+        Standard 5.0 is the design above; what of it is still to be built is listed under State of the code. Later standards add the following, each described in its own section. A database lists the standards it follows in its <RT·code>standard</RT·code> table, so a database moves to a later standard by listing it, and a program that follows only an earlier one refuses it.
       </p>
 
       <ul>
@@ -611,20 +895,20 @@
 
       <h1>Standard 6.0</h1>
 
-      <h2>Longer account names</h2>
+      <h2>Longer account name</h2>
 
       <p>
         Account names built from a chain of parent names grow long, and 32 bytes, with two for each middle dot, is soon reached. 6.0 is to allow names of 128 bytes. The limit is in user space: the login records and <RT·code>useradd</RT·code>. Distributions are replacing the <RT·code>utmp</RT·code> records with <RT·code>wtmpdb</RT·code> and <RT·code>lastlog2</RT·code>, which have no fixed name field; openSUSE has done so. What remains is the check in <RT·code>useradd</RT·code>, which goes away when Account-Tree edits the account files itself. Whether a system already accepts longer names is found by making a test account with a name past 32 bytes.
       </p>
 
-      <h2>Keys</h2>
+      <h2>Key</h2>
 
       <p>
         In 5.0, databases and systems recognize each other by database uuid and system uuid. 6.0 adds two uses of keys.
       </p>
 
       <p>
-        <em>Unlocking storage.</em> A storage's file system is encrypted with LUKS2, which keeps up to 32 key slots, any of which opens it. Each person whose accounts are on the storage has a slot, opened by a passphrase or by a hardware token such as a FIDO2 key. When a storage is introduced to a system, the administrator opens it once, and the system adds a slot of its own, with a key it keeps, so that the storage is opened and attached on that system without asking anyone for a password. systemd-cryptenroll already enrolls such slots, and can seal a key in the machine's TPM, the security chip on its motherboard, so that the key is useless away from that machine. A slot can be removed from any machine that can open the storage, which is how a stolen laptop is cut off from it. Opening a storage with a key the system enrolled is also the proof that it is the storage that was introduced, which uuids and hashes cannot give: a fabricated storage cannot be opened with that key. The keys a system keeps make the place they are kept a target in the way <RT·code>/etc/shadow</RT·code> is; sealing them in the TPM is the protection. The disk inside the machine can be treated the same way, its <RT·code>/home</RT·code> opened by the system's own slot at boot, which keeps every storage alike.
+        <em>Unlocking storage.</em> A storage's file system is encrypted with LUKS2, which keeps up to 32 key slots, any of which opens it. Each person whose accounts are on the storage has a slot, opened by a passphrase or by a hardware token such as a FIDO2 key. In 5.0 a removable storage is opened this way, by a key enrolled by hand, as described under Plug and unplug. 6.0 adds the system's own slot. When a storage is introduced to a system, the administrator opens it once, and the system adds a slot of its own, with a key it keeps, so that the storage is opened and attached on that system without asking anyone for a password. systemd-cryptenroll already enrolls such slots, and can seal a key in the machine's TPM, the security chip on its motherboard, so that the key is useless away from that machine. A slot can be removed from any machine that can open the storage, which is how a stolen laptop is cut off from it. Opening a storage with a key the system enrolled is also the proof that it is the storage that was introduced, which uuids and hashes cannot give: a fabricated storage cannot be opened with that key. The keys a system keeps make the place they are kept a target in the way <RT·code>/etc/shadow</RT·code> is; sealing them in the TPM is the protection. The disk inside the machine can be treated the same way, its <RT·code>/home</RT·code> opened by the system's own slot at boot, which keeps every storage alike.
       </p>
 
       <p>
@@ -642,7 +926,7 @@
       </p>
 
       <p>
-        The Account-Tree server already runs under a service, and is a natural home for a background pass over attached storage. The pass keeps an index of content hashes, gives the kernel call the pairs whose hashes match, and so keeps each storage compacted as it is used. On a file system without shared extents, the pass reports duplicates and changes nothing. The same index serves integration in 7.0.
+        A background pass over attached storage, started by a systemd timer through the administrator's gate, does the work. The pass keeps an index of content hashes, gives the kernel call the pairs whose hashes match, and so keeps each storage compacted as it is used. On a file system without shared extents, the pass reports duplicates and changes nothing. The same index serves integration in 7.0.
       </p>
 
       <h2>Deep freeze</h2>
@@ -664,7 +948,7 @@
       </p>
 
       <p>
-        The second brings back a child copy: part of an account's home copied to a portable storage, changed there, and returned. Its changes are merged into the original. A change to the directory structure on either side is the hard case, as when a file is moved on one side and changed on the other. Two lines of one storage, described under Copies and branches, are merged the same way.
+        The second brings back a child copy: part of an account's home copied to a portable storage, changed there, and returned. Its changes are merged into the original. A change to the directory structure on either side is the hard case, as when a file is moved on one side and changed on the other. Two lines of one storage, described under Copy and branch, are merged the same way.
       </p>
 
       <h2>Property file system</h2>

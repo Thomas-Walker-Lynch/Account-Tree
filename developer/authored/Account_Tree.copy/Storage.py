@@ -493,8 +493,10 @@ def attach(dirp__storage ,branch ,log ,preview):
   # unplug deleted, before anything reads the rows in use
   set__promised = set()
   dict__group_later = {}
+  dict__share_skipped = {}
   count_of__replugged = sum(1 for m in system_map__unplugged(system_db ,db)
-                            if SameAccount.same_account__replug(system_db ,m ,log ,preview ,set__promised ,dict__group_later))
+                            if SameAccount.same_account__replug(system_db ,m ,log ,preview ,set__promised ,dict__group_later
+                                                                ,dict__share_skipped ,db))
   # supplementary groups that are own groups of accounts made after it
   for name ,list__group in dict__group_later.items():
     list__now = [g for g in list__group if preview or SameAccount.sa.system_group(g) is not None]
@@ -550,6 +552,15 @@ def attach(dirp__storage ,branch ,log ,preview):
 
   for m in in_use:
     attach_account(dirp__Account_Tree ,db ,m ,log ,preview)
+  import Share   # here, as Share imports this module
+  Share.share__apply(system_db ,db ,log ,preview)
+  import Sound   # here, as Sound imports StoragePlug, which imports this module
+  Sound.fifo__sync_storage(system_db ,db ,log ,preview)
+  for name ,list__share in dict__share_skipped.items():
+    for share in list__share:
+      if not Share.is__member(name ,share) and not preview:
+        log.line("warning" ,name ,f"was a member of the group {share} here, a share the storage database does not record,"
+                 " so it is not made again; Account-Tree share makes it, and share record keeps such shares before an unplug")
   mapped = {m["database_uid"] for m in in_use}
   for a in db.rows("SELECT * FROM account WHERE state = 'active' ORDER BY name"):
     if a["database_uid"] not in mapped:
@@ -560,6 +571,8 @@ def attach(dirp__storage ,branch ,log ,preview):
 
 def attach_account(dirp__Account_Tree ,db ,m ,log ,preview):
   a = db.row("SELECT * FROM account WHERE database_uid = ?" ,(m["database_uid"],))
+  if a is not None and a["state"] == "deprecated":
+    log.line("skipped" ,m["system_account__name"] ,"deprecated, so its home is not mounted; it is kept until deallocated"); return
   if a is None or a["state"] != "active":
     log.error(m["system_account__name"] ,f"the system map names database uid {m['database_uid']},"
               " which is not an active storage account of this database"); return

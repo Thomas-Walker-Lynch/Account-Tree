@@ -97,6 +97,54 @@ def child_account__name(parent: str ,short: str) -> str:
     return short
   return parent + SEPARATOR + short
 
+def account_name__expand(name__current: str ,text: str ,is__existing: bool = True) -> str:
+  """
+  The system account name of the account text names, read from the current
+  account, name__current, the account the program runs under. Written as on
+  a command line:
+
+    ·                 root
+    ·<name>           absolute: <name> below root, as ·Thomas·developer
+    <name>            relative: <name> below the current account, as
+                      developer, from Thomas, for Thomas·developer
+
+  A leading separator marks the name absolute, and no account name begins
+  with one, as no part of a name is empty; so a text has one reading,
+  whatever the current account is. Root's children carry no prefix in
+  /etc/passwd, so ·Thomas is Thomas, and from root a relative name is the
+  name itself. A trailing separator, which would name the accounts below an
+  account rather than the account, is refused, as no command takes that yet.
+
+  Raises ValueError when text is not an account name, and, with
+  is__existing, when no system account has the name.
+  """
+  if not text:
+    raise ValueError("an account name is not empty")
+  if text == SEPARATOR:
+    name = "root"
+  else:
+    is__absolute = text.startswith(SEPARATOR)
+    rest = text[1:] if is__absolute else text
+    if rest.endswith(SEPARATOR):
+      raise ValueError(f"{text} ends with '{SEPARATOR}', which would name the accounts below one; an account is named here")
+    if rest.startswith(SEPARATOR) or SEPARATOR + SEPARATOR in rest:
+      raise ValueError(f"every part of an account name between the separators '{SEPARATOR}' is not empty: {text}")
+    if is__absolute or name__current == "root":
+      name = rest
+    else:
+      name = name__current + SEPARATOR + rest
+  if is__existing and sa.system_account(name) is None:
+    raise ValueError(f"there is no account {name}" + ("" if name == text else f", which {text} names"))
+  return name
+
+def account_name__specifier(name: str) -> str:
+  """
+  The absolute text that names the system account name on a command line,
+  the inverse of account_name__expand: · for root, and ·<name> for every
+  other account, as ·Thomas·developer.
+  """
+  return SEPARATOR if name == "root" else SEPARATOR + name
+
 def parent_of(name: str) -> str:
   return split_name(name)[0]
 

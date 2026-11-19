@@ -81,6 +81,91 @@ CREATE TABLE same_account__database (
   UNIQUE (other_database__uuid ,database_uid)
 );
 
+-- Tables added after storage databases were first made; opening a database
+-- that lacks one makes it (see Database.schema_added__text).
+
+-- Each share: the member account is in the own group of the sharing account,
+-- so it reaches what the sharing account gives its group. Both accounts are
+-- this storage database's, by database uid. Attach makes each share on the
+-- system the storage is attached to; this table, not a system's saved
+-- groups, is the authority for shares among the storage's accounts, so a
+-- share made or removed on one system holds on every other.
+CREATE TABLE IF NOT EXISTS account_share (
+  share__database_uid   INTEGER NOT NULL,
+  member__database_uid  INTEGER NOT NULL,
+  made                  TEXT NOT NULL,
+  PRIMARY KEY (share__database_uid ,member__database_uid)
+);
+
+-- What a storage account's system account has that its home does not carry:
+-- its password, as /etc/shadow holds the hash, its password aging, comment
+-- and shell. Written at each unplug, from the system unplugged from, while the
+-- storage can still be read, and given to the system account made again at
+-- the next plug, on whichever system: a person's password is the same on every
+-- system the storage is plugged into. A field empty in /etc/shadow is NULL.
+CREATE TABLE IF NOT EXISTS account_setting (
+  database_uid            INTEGER PRIMARY KEY,
+  comment                 TEXT NOT NULL,
+  shell                   TEXT NOT NULL,
+  password                TEXT NOT NULL,   -- the hash, as /etc/shadow holds it
+  password__last_change   INTEGER,         -- days since 1970-01-01
+  password__minimum_day   INTEGER,
+  password__maximum_day   INTEGER,
+  password__warning_day   INTEGER,
+  password__inactive_day  INTEGER,
+  account__expire         INTEGER,         -- days since 1970-01-01
+  saved                   TEXT NOT NULL
+);
+
+-- Sound; see design_audio.html. The buses of each tree, made only from its
+-- login account, and numbered within the tree.
+CREATE TABLE IF NOT EXISTS sound_bus (
+  login__database_uid  INTEGER NOT NULL,
+  bus__number          INTEGER NOT NULL,
+  name                 TEXT NOT NULL,
+  made                 TEXT NOT NULL,
+  PRIMARY KEY (login__database_uid ,bus__number),
+  UNIQUE (login__database_uid ,name)
+);
+
+-- A row for each permit set for one end of one bus of the account's tree.
+-- Whether it is in force is worked out: set, and the parent's in force, or,
+-- for the login account, the system's allowance given.
+CREATE TABLE IF NOT EXISTS sound_permit_bus_end (
+  database_uid  INTEGER NOT NULL,
+  bus__number   INTEGER NOT NULL,
+  bus_end       TEXT NOT NULL CHECK (bus_end IN ('gather' ,'broadcast')),
+  made          TEXT NOT NULL,
+  PRIMARY KEY (database_uid ,bus__number ,bus_end)
+);
+
+-- A row for each permit set for a device of the hub.
+CREATE TABLE IF NOT EXISTS sound_permit_device (
+  database_uid  INTEGER NOT NULL,
+  device        TEXT NOT NULL CHECK (device IN ('@output' ,'@input')),
+  made          TEXT NOT NULL,
+  PRIMARY KEY (database_uid ,device)
+);
+
+-- A row for each account that has a connection table, made when its first
+-- permit is set and kept from then on, its lines or none.
+CREATE TABLE IF NOT EXISTS sound_connection_table (
+  database_uid  INTEGER PRIMARY KEY,
+  made          TEXT NOT NULL
+);
+
+-- The lines of each connection table, in order. A comment line, or a blank
+-- one, has no end and no bus, and its text as its endpoint.
+CREATE TABLE IF NOT EXISTS sound_connection (
+  database_uid    INTEGER NOT NULL,
+  line__number    INTEGER NOT NULL,
+  bus_end         TEXT CHECK (bus_end IN ('gather' ,'broadcast')),
+  bus__number     INTEGER,
+  endpoint__kind  TEXT NOT NULL CHECK (endpoint__kind IN ('program' ,'device' ,'comment')),
+  endpoint        TEXT NOT NULL,
+  PRIMARY KEY (database_uid ,line__number)
+);
+
 -- Every change. hash covers previous_hash, series, description, change and nonce.
 CREATE TABLE transaction_log (
   series         INTEGER PRIMARY KEY,

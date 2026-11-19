@@ -17,6 +17,16 @@ and nothing the schema adds on opening, as Database.Database.open does, runs.
                                and why not
   account__below               the checks the request guard makes of an account
                                a request names, below the asking account
+  child_account__make__problem the checks of a request to make an account: its
+                               parent is the asking account or below it, its
+                               name is free, and the limits allow one more
+  below__not_in                the accounts below an account not in given states
+
+A limit, set by the administrator with limit set, says how many accounts can
+be below an account, counted in its storage database, those deallocated left
+out. Making an account needs room under the limit of its parent and of each
+account above it up to the login account. An account with no
+limit set can have System.LIMIT__DEFAULT below it.
 """
 
 import os ,pwd ,sqlite3
@@ -24,8 +34,9 @@ from pathlib import Path
 
 import Database
 import Kernel
-from Common import DIRPA__HOME ,dirpa__Account_Tree
+from Common import DIRPA__HOME ,SEPARATOR ,dirpa__Account_Tree ,valid_name
 import SystemAccount as sa
+from System import limit__of
 
 DEPTH_MAX = 64   # no tree is deeper; a longer chain of parent links is a loop
 
@@ -106,13 +117,14 @@ def is__below(storage_db ,database_uid ,database_uid__above):
     each = parent
   return False ,f"the parent links above database uid {database_uid} are longer than {DEPTH_MAX}, a loop"
 
-def account__below(system_db ,account__asking ,account__named):
+def account__below(system_db ,account__asking ,account__named ,list__state=("active",) ,is__mounted=True):
   """
   The problems, as a list of messages, with a request by the system account
   account__asking that names the system account account__named. Empty when
   account__named is below account__asking in the tree, both are managed by
-  Account-Tree and in use here, the named one is active, the system map
-  agrees with /etc/passwd about its uid, and its home is mounted.
+  Account-Tree and in use here, the named one is in one of the states in
+  list__state, the system map agrees with /etc/passwd about its uid, and,
+  with is__mounted, its home is mounted.
   """
   if account__named == account__asking:
     return [f"{account__named} is the asking account itself, not an account below it"]
@@ -134,13 +146,88 @@ def account__below(system_db ,account__asking ,account__named):
     return [str(error)]
   try:
     state = storage_db.execute("SELECT state FROM account WHERE database_uid = ?" ,(row__named["database_uid"],)).fetchone()
-    if state is None or state["state"] != "active":
-      return [f"{account__named} is {state['state'] if state else 'not'} in its storage database, not active"]
+    if state is None or state["state"] not in list__state:
+      return [f"{account__named} is {state['state'] if state else 'not'} in its storage database, not {' or '.join(list__state)}"]
     below ,why = is__below(storage_db ,row__named["database_uid"] ,row__asking["database_uid"])
     if not below:
       return [f"{account__named} is not below {account__asking}: {why}"]
   finally:
     storage_db.close()
-  if not Kernel.is__mount_point(DIRPA__HOME / account__named):
+  if is__mounted and not Kernel.is__mount_point(DIRPA__HOME / account__named):
     return [f"the home of {account__named}, {DIRPA__HOME / account__named}, is not mounted"]
   return []
+
+def row__storage_account(system_db ,system_account__name):
+  """
+  (storage_db ,account) for a system account in use here: its storage
+  database, read-only, and its row there. Raises RecordError.
+  """
+  row = system_map__in_use(system_db ,system_account__name)
+  if row is None:
+    raise RecordError(f"{system_account__name} is not an account Account-Tree keeps in use here")
+  storage_db ,_ = storage_database__of(system_db ,row["database_uuid"])
+  account = storage_db.execute("SELECT * FROM account WHERE database_uid = ?" ,(row["database_uid"],)).fetchone()
+  if account is None:
+    storage_db.close()
+    raise RecordError(f"the storage database has no account of database uid {row['database_uid']}")
+  return storage_db ,account
+
+def count_of__below(storage_db ,database_uid):
+  "how many accounts are below the account database_uid in storage_db, those deallocated left out"
+  return storage_db.execute(
+    "WITH RECURSIVE below(database_uid) AS ("
+    " SELECT database_uid FROM account WHERE parent__database_uid = ?"
+    " UNION SELECT a.database_uid FROM account a JOIN below b ON a.parent__database_uid = b.database_uid)"
+    " SELECT COUNT(*) AS n FROM account WHERE database_uid IN below AND state != 'deallocated'" ,(database_uid,)).fetchone()["n"]
+
+def below__not_in(system_db ,system_account__name ,list__state):
+  "the names of the accounts directly below a system account in use, in its storage database, whose state is not in list__state"
+  storage_db ,account = row__storage_account(system_db ,system_account__name)
+  try:
+    return [a["name"] for a in storage_db.execute("SELECT name ,state FROM account WHERE parent__database_uid = ? ORDER BY name"
+                                                 ,(account["database_uid"],)) if a["state"] not in list__state]
+  finally:
+    storage_db.close()
+
+def child_account__make__problem(system_db ,account__asking ,name):
+  """
+  The problems with a request by account__asking to make the account name,
+  whose parent is the name before its last separator. The parent is the
+  asking account or an account below it, in use and active; name is free
+  here and in the parent's storage database; and there is room under the
+  limit of the parent and of each account above it.
+  """
+  parent = name.rsplit(SEPARATOR ,1)[0]
+  if sa.system_account(name) is not None or (DIRPA__HOME / name).exists():
+    return [f"{name} exists already on this system"]
+  if parent != account__asking:
+    found = account__below(system_db ,account__asking ,parent ,("active",) ,is__mounted=False)
+    if found:
+      return [f"its parent: {p}" for p in found]
+  try:
+    storage_db ,account = row__storage_account(system_db ,parent)
+  except RecordError as error:
+    return [str(error)]
+  try:
+    list__problem = []
+    if account["state"] != "active":
+      list__problem.append(f"its parent {parent} is {account['state']}")
+    if account["name"] != parent:
+      list__problem.append(f"the storage account of {parent} is named {account['name']}, a branch;"
+                           " a child account is made only for an account whose two names are the same")
+    if storage_db.execute("SELECT 1 FROM account WHERE name = ?" ,(name,)).fetchone():
+      list__problem.append(f"{name} is in the storage database already")
+    # room under the limit of the parent and of each account above it
+    each = account
+    for _ in range(DEPTH_MAX):
+      maximum = limit__of(system_db ,each["name"])
+      count = count_of__below(storage_db ,each["database_uid"])
+      if count + 1 > maximum:
+        list__problem.append(f"{each['name']} has {count} accounts below it, and its limit is {maximum};"
+                             " the administrator sets another with limit set")
+      if each["parent__database_uid"] is None: break
+      each = storage_db.execute("SELECT * FROM account WHERE database_uid = ?" ,(each["parent__database_uid"],)).fetchone()
+      if each is None: break
+    return list__problem
+  finally:
+    storage_db.close()

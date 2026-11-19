@@ -16,10 +16,14 @@
 #   the files of the consumer directory, Account-Tree's program
 #   Account_Tree__Gate/Account_Tree__Gate·Request
 #                         the request gate, from the consumer directory
-#                         beside it, consumer/Account_Tree__Gate, setuid root,
-#                         mode 4755: its guard and interpreter, the
-#                         Request·*.py of the program, then run with root's
-#                         rights
+#                         beside it, consumer/Account_Tree__Gate, setuid and
+#                         setgid root, mode 6755: its guard and interpreter,
+#                         the Request·*.py of the program, then run with root's
+#                         rights. The setuid bit sets only the effective uid,
+#                         so without the setgid bit the interpreter would run
+#                         with the asking account's gid, and every file and
+#                         directory it made, such as a mount point, would
+#                         belong to that account's group
 #   Man_In_Grey/          the modules of Man-In-Grey the gate's guard and
 #                         interpreter, and the program's requests, import,
 #                         from the project's dependency on Man-In-Grey
@@ -75,7 +79,7 @@ list__install(){
   while IFS= read -r f; do
     printf '%s\t%s\t%s\n' "$f" "$dirpa__source/$f" "$(file_mode "$dirpa__source/$f")"
   done < <(list__file "$dirpa__source")
-  printf '%s\t%s\t%s\n' "Account_Tree__Gate/$FILEN__GATE" "$(dirpa__gate_source "$dirpa__source")/$FILEN__GATE" 4755
+  printf '%s\t%s\t%s\n' "Account_Tree__Gate/$FILEN__GATE" "$(dirpa__gate_source "$dirpa__source")/$FILEN__GATE" 6755
   for m in "${LIST__MAN_IN_GREY_MODULE[@]}"; do
     printf '%s\t%s\t%s\n' "Man_In_Grey/$m" "$(dirpa__Man_In_Grey_source "$dirpa__source")/$m" 0644
   done

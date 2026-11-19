@@ -29,10 +29,21 @@ machinectl shell does, and as systemd-machined does for it:
 A process the session starts runs under the child account. The grant of the
 display is not taken back when the session ends; it lasts as long as the
 display does.
+
+make_child_account and deallocate call the work functions of ChildAccount.py,
+share_with and share_remove those of Share.py, and the sound requests those
+of Sound.py, which Account-Tree_admin calls too. Those report through a
+Common.Log, which prints to standard output; the interpreter's standard
+output is for its verdict alone, so they are given LogInterpreter, which
+reports each line as the interpreter's own, on standard error.
 """
 
 import grp ,os ,pwd ,secrets ,subprocess
 
+import Common
+import ChildAccount
+import Share
+import Sound
 import SystemAccount as sa
 
 SHELL__DEFAULT = "/bin/sh"
@@ -57,6 +68,27 @@ def run(log ,argument ,what ,**option):
   if completed.returncode != 0:
     raise RequestError(f"{what}: {argument[0]} exited {completed.returncode}")
   return completed.stdout
+
+class LogInterpreter(Common.Log):
+  """A Common.Log whose lines are the interpreter's: each goes to log(tag ,message), on standard error."""
+
+  def __init__(self ,log):
+    super().__init__(False)
+    self._log = log
+    self.list__error = []
+
+  def line(self ,tag ,subject ,reason=None):
+    self.count[tag] = self.count.get(tag ,0) + 1
+    self._log(tag.replace(" " ,"-") ,subject + (f" ({reason})" if reason else ""))
+
+  def error(self ,subject ,reason):
+    self.count_of__error += 1
+    self.list__error.append(f"{subject}: {reason}")
+    self._log("error" ,f"{subject}: {reason}")
+
+  def failure(self ,what):
+    "a RequestError saying what stopped, from the errors logged"
+    return RequestError(f"{what}: " + ("; ".join(self.list__error) or "it stopped"))
 
 class LibraryInstruction:
 
@@ -139,6 +171,68 @@ class LibraryInstruction:
     self._log("entered" ,f"{child.pw_name} on {fpa__slave}, as the unit {unit}.service, shell {shell}")
     self._list__fd__close.remove(fd__master)
     session.append({"pty": fd__master})
+
+  def make_child_account(self ,account_name ,made):
+    log = LogInterpreter(self._log)
+    parent ,short_name = account_name.rsplit("·" ,1)
+    result = ChildAccount.child__make(parent ,short_name ,[] ,log ,False)
+    if result is None:
+      raise log.failure(f"making {account_name}")
+    made.append(result)
+
+  def deallocate(self ,account_name):
+    log = LogInterpreter(self._log)
+    if not ChildAccount.child__deallocate(account_name ,log ,False):
+      raise log.failure(f"deallocating {account_name}")
+
+  def share_with(self ,account_name ,list__account_name):
+    log = LogInterpreter(self._log)
+    if not Share.share__with(account_name ,list__account_name ,log ,False):
+      raise log.failure(f"sharing {account_name}")
+
+  def share_remove(self ,account_name ,list__account_name):
+    log = LogInterpreter(self._log)
+    if not Share.share__remove(account_name ,list__account_name ,log ,False):
+      raise log.failure(f"ending shares of {account_name}")
+
+  def sound_show(self ,account_name ,sound):
+    log = LogInterpreter(self._log)
+    value = Sound.sound__of(self._asking.pw_name ,account_name ,log)
+    if value is None:
+      raise log.failure(f"showing the sound of {account_name}")
+    sound.append(value)
+
+  def sound_permit_set(self ,account_name ,permit ,is__set):
+    log = LogInterpreter(self._log)
+    if not Sound.permit__set(self._asking.pw_name ,account_name ,permit ,is__set ,log ,False):
+      raise log.failure(f"{'setting' if is__set else 'clearing'} the permit {permit} of {account_name}")
+
+  def sound_connection_set(self ,account_name ,text__connection):
+    log = LogInterpreter(self._log)
+    if not Sound.connection__set(self._asking.pw_name ,account_name ,text__connection ,log ,False):
+      raise log.failure(f"setting the connection table of {account_name}")
+
+  def sound_connection_reset(self ,account_name):
+    log = LogInterpreter(self._log)
+    if not Sound.connection__reset(self._asking.pw_name ,account_name ,log ,False):
+      raise log.failure(f"resetting the connection table of {account_name}")
+
+  def sound_bus_set(self ,bus__number ,bus__name):
+    log = LogInterpreter(self._log)
+    if not Sound.bus__set(self._asking.pw_name ,bus__number ,bus__name ,log ,False):
+      raise log.failure(f"setting bus {bus__number}")
+
+  def sound_bus_remove(self ,bus__number):
+    log = LogInterpreter(self._log)
+    if not Sound.bus__remove(self._asking.pw_name ,bus__number ,log ,False):
+      raise log.failure(f"removing bus {bus__number}")
+
+  def sound_route_show(self ,route):
+    log = LogInterpreter(self._log)
+    value = Sound.route__of(self._asking.pw_name ,log)
+    if value is None:
+      raise log.failure("showing the route")
+    route.append(value)
 
   def release(self):
     # the slave is held by the session now; the master, when it is handed

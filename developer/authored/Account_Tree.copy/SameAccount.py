@@ -71,6 +71,27 @@ def saved__read(system_db ,row):
           "list__supplementary_group": [g["group_name"] for g in system_db.rows(
             "SELECT group_name FROM system_account__saved_group WHERE database_uuid = ? AND database_uid = ? ORDER BY group_name" ,key)]}
 
+def setting__storage_write(t ,database_uid ,setting):
+  """
+  In transaction t, on the storage database, keep the setting of a storage
+  account's system account, as system_account__setting gives it, in place
+  of any kept before; its supplementary groups are not kept there.
+  """
+  column = list(SAVED__AGING_COLUMN.values())
+  value = [int(setting["aging"][k]) if setting["aging"].get(k ,"") != "" else None for k in SAVED__AGING_COLUMN]
+  t.execute("DELETE FROM account_setting WHERE database_uid = ?" ,(database_uid,))
+  t.execute("INSERT INTO account_setting(database_uid ,comment ,shell ,password ," + " ,".join(column) + " ,saved)"
+            " VALUES (?" + " ,?" * (4 + len(column)) + ")"
+            ,(database_uid ,setting["comment"] ,setting["shell"] ,setting["password"]) + tuple(value) + (Database.now(),))
+
+def setting__storage_read(storage_db ,database_uid):
+  "the setting the storage database keeps for a storage account, without supplementary groups, or None"
+  r = storage_db.row("SELECT * FROM account_setting WHERE database_uid = ?" ,(database_uid,))
+  if r is None:
+    return None
+  return {"comment": r["comment"] ,"shell": r["shell"] ,"password": r["password"],
+          "aging": {k: ("" if r[c] is None else str(r[c])) for k ,c in SAVED__AGING_COLUMN.items()}}
+
 def saved__delete(t ,row):
   """In transaction t, delete what was kept for the system account of row."""
   key = (row["database_uuid"] ,row["database_uid"])
@@ -459,7 +480,8 @@ def same_account__unplug(system_db ,row ,log ,preview):
   log.line("unplugged" ,name ,f"system uid {row['system_uid']} freed; made again when its storage is plugged in")
   return True
 
-def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict__group_later=None):
+def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict__group_later=None ,dict__share_skipped=None
+                         ,storage_db=None):
   """
   For an unplugged row: make its system account again, with the next free
   system uid and what was kept of it, and put the row back in use. Run by
@@ -469,6 +491,21 @@ def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict_
   another account of the storage not made again yet, is put in
   dict__group_later under the account's name, for the caller to add once
   every account is made; without dict__group_later it is warned of.
+
+  Its password, password aging, comment and shell come from storage_db's
+  account_setting, written at the last unplug on whichever system, so that
+  they are the same on every system; only when it keeps none for the
+  account, as for a storage last unplugged before it kept them, do they come
+  from what this system kept. Its groups outside the storage come from what
+  this system kept, as an administrator gives those on each system.
+
+  The own group of an account of the same storage is not restored from what
+  this system kept: such a membership is a share, and the storage
+  database's account_share table is the authority for it, applied by attach
+  with Share.share__apply, so that a share ended on another system does not
+  come back here. Each one skipped is put in dict__share_skipped under the
+  account's name, for attach to warn of when the storage does not record it.
+
   Returns False when it could not.
   """
   name = row["system_account__name"]
@@ -483,8 +520,16 @@ def same_account__replug(system_db ,row ,log ,preview ,set__promised=None ,dict_
     log.error(name ,"no free system uid in this system's range"); return False
   if set__promised is not None: set__promised.add(system_uid)
   setting = saved__read(system_db ,row)
+  setting__storage = setting__storage_read(storage_db ,row["database_uid"]) if storage_db is not None else None
+  if setting__storage:
+    setting = dict(setting__storage ,list__supplementary_group=setting["list__supplementary_group"] if setting else [])
   if setting:
-    list__group = setting["list__supplementary_group"]
+    set__storage_account = {r["system_account__name"] for r in system_db.rows(
+      "SELECT system_account__name FROM system_map WHERE database_uuid = ?" ,(row["database_uuid"],))}
+    list__share = [g for g in setting["list__supplementary_group"] if g in set__storage_account]
+    if list__share and dict__share_skipped is not None:
+      dict__share_skipped[name] = list__share
+    list__group = [g for g in setting["list__supplementary_group"] if g not in set__storage_account]
     list__missing = [g for g in list__group if sa.system_group(g) is None]
     if list__missing and dict__group_later is not None:
       dict__group_later[name] = list__missing

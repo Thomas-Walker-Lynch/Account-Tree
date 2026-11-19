@@ -72,6 +72,7 @@ from Common import SEPARATOR ,act ,dirp__storage__problem ,dirpa__Account_Tree
 from System import open_system_database
 import SameAccount
 import Storage
+import SystemAccount as sa
 
 DIRPA__RUN = Path("/run/Account-Tree")
 DIRPA__PLUGGED = DIRPA__RUN / "plugged"
@@ -157,7 +158,8 @@ class Lock:
 
   def __enter__(self):
     if Lock.depth == 0:
-      DIRPA__RUN.mkdir(mode=0o700 ,exist_ok=True)
+      # 0711: accounts pass through to their sound FIFOs in bus/, and list nothing
+      DIRPA__RUN.mkdir(mode=0o711 ,exist_ok=True)
       Lock.fd = os.open(str(FPA__LOCK) ,os.O_RDWR | os.O_CREAT | os.O_CLOEXEC ,0o600)
       fcntl.flock(Lock.fd ,fcntl.LOCK_EX)
     Lock.depth += 1
@@ -752,9 +754,14 @@ def unplug_locked(spec ,log ,preview):
     dirpa__target = Path("/home") / m["system_account__name"]
     mount__remove(dirpa__target ,log ,preview)
   detach__record(system_db ,r ,log ,preview)
+  setting__record(r ,list__row ,log ,preview)
 
   # 3. delete the system accounts Account-Tree made for its accounts, keeping
   # what plugging it in again needs to make them again; free their uids
+  # its accounts' sound FIFOs go first, so none outlives the uid it was made for
+  import Sound   # here, as Sound imports this module
+  for m in list__row:
+    Sound.fifo__remove(m["system_account__name"] ,log ,preview)
   list__unplugged = []
   for m in list__row:
     if m["origin"] != "made": continue
@@ -992,6 +999,35 @@ def mount__remove(dirp__target ,log ,preview):
     return True
   log.error(str(dirp__target) ,f"umount failed: {os.strerror(Kernel.ctypes.get_errno())}")
   return False
+
+def setting__record(r ,list__row ,log ,preview):
+  """
+  Keep in the storage database, while the storage can still be read, the
+  password, password aging, comment and shell of each system account
+  Account-Tree made for the storage's accounts, before unplug deletes them,
+  so that the next plug, on any system, makes them again with the same. When
+  the drive has been pulled out first, they cannot be written, and the next
+  plug finds those kept before; the system keeps its own copy as well.
+  """
+  storage_db = None
+  try:
+    storage_db = Database.Database.open(Database.fpa__storage_database(dirpa__Account_Tree(r["dirpa__mount"])) ,"storage")
+    list__kept = []
+    for m in list__row:
+      if m["origin"] != "made": continue
+      entry = sa.system_account(m["system_account__name"])
+      if entry is None or entry.pw_uid != m["system_uid"]: continue
+      list__kept.append((m ,sa.system_account__setting(m["system_account__name"])))
+    if list__kept:
+      with storage_db.transaction(f"keep the settings of {len(list__kept)} system accounts at unplug" ,preview) as t:
+        for m ,setting in list__kept:
+          SameAccount.setting__storage_write(t ,m["database_uid"] ,setting)
+      log.line("kept" ,f"the settings of {len(list__kept)} accounts" ,"password, aging, comment and shell, on the storage")
+  except (OSError ,sqlite3.Error ,DatabaseError) as error:
+    log.line("skipped" ,f"storage {r['storage_name']}" ,f"the settings were not kept on it, the storage cannot be read: {error}")
+  finally:
+    # an open database file would hold the storage's file system busy
+    if storage_db is not None: storage_db.close()
 
 def detach__record(system_db ,r ,log ,preview):
   """
