@@ -2,7 +2,7 @@
 --
 -- The storage database, standard 5.0, at
 -- <storage root>/home/Account-Tree/database.sqlite3. It records the storage accounts
--- kept on the storage. It grants nothing on any system: which storage accounts
+-- kept on the storage. It confers nothing on any system: which storage accounts
 -- are the same accounts as system accounts on a system is recorded by that
 -- system, in its system database.
 --
@@ -128,9 +128,10 @@ CREATE TABLE IF NOT EXISTS sound_bus (
   UNIQUE (login__database_uid ,name)
 );
 
--- A row for each permit set for one end of one bus of the account's tree.
--- Whether it is in force is worked out: set, and the parent's in force, or,
--- for the login account, the system's allowance given.
+-- A row for each permit an account holds for one end of one bus of its
+-- tree; made is when it was issued. Whether it is in force is worked out:
+-- held, and the parent's in force, or, for the login account, its grant of
+-- sound held.
 CREATE TABLE IF NOT EXISTS sound_permit_bus_end (
   database_uid  INTEGER NOT NULL,
   bus__number   INTEGER NOT NULL,
@@ -139,7 +140,8 @@ CREATE TABLE IF NOT EXISTS sound_permit_bus_end (
   PRIMARY KEY (database_uid ,bus__number ,bus_end)
 );
 
--- A row for each permit set for a device of the hub.
+-- A row for each permit an account holds for a device of the hub; made is
+-- when it was issued.
 CREATE TABLE IF NOT EXISTS sound_permit_device (
   database_uid  INTEGER NOT NULL,
   device        TEXT NOT NULL CHECK (device IN ('@output' ,'@input')),
@@ -148,7 +150,7 @@ CREATE TABLE IF NOT EXISTS sound_permit_device (
 );
 
 -- A row for each account that has a connection table, made when its first
--- permit is set and kept from then on, its lines or none.
+-- permit is issued and kept from then on, its lines or none.
 CREATE TABLE IF NOT EXISTS sound_connection_table (
   database_uid  INTEGER PRIMARY KEY,
   made          TEXT NOT NULL

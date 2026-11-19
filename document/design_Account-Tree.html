@@ -769,6 +769,7 @@
       <ul>
         <li><RT·code>Account-Tree</RT·code>: the person's program, run under the person's account. Its commands: <RT·code>window</RT·code> and <RT·code>list</RT·code>, given an account; <RT·code>resource</RT·code>; <RT·code>current</RT·code>; <RT·code>enter</RT·code>; <RT·code>account make child</RT·code> and <RT·code>account deallocate</RT·code>, the second asking for the account's full name to be typed unless <RT·code>confirmed</RT·code> is given; and <RT·code>share with</RT·code>, <RT·code>share remove</RT·code> and <RT·code>share list</RT·code>; and <RT·code>sound show</RT·code>, <RT·code>sound permit</RT·code>, <RT·code>sound connection</RT·code> and <RT·code>sound bus</RT·code>. <RT·code>list</RT·code> and the window read the tree from the names of the system accounts in <RT·code>/etc/passwd</RT·code>, through <RT·code>AccountTree.py</RT·code>, which needs no privilege.</li>
         <li><RT·code>Account-Tree_admin</RT·code>: the administrator's program, run under root. Its commands: <RT·code>system make</RT·code>, <RT·code>system show</RT·code>, <RT·code>system delete</RT·code> and <RT·code>system configure</RT·code>; <RT·code>storage make</RT·code>, <RT·code>storage show</RT·code> and <RT·code>storage delete</RT·code>, each given a storage's root; <RT·code>storage register</RT·code>, <RT·code>storage unregister</RT·code>, <RT·code>storage plug</RT·code> and <RT·code>storage unplug</RT·code>; <RT·code>account make</RT·code> and <RT·code>account deallocate</RT·code>; <RT·code>is-same-account</RT·code>, <RT·code>is-not-same-account</RT·code>, <RT·code>same-account show</RT·code> and <RT·code>same-account suggest</RT·code>; <RT·code>attach</RT·code> and <RT·code>detach</RT·code>; <RT·code>limit set</RT·code>; <RT·code>share record</RT·code>; and <RT·code>sound grant issue</RT·code>, <RT·code>sound grant revoke</RT·code> and <RT·code>sound grant show</RT·code>. Detaching is refused while a system account it would unmount has a session.</li>
+        <li><RT·code>Account-Tree_router</RT·code>: the sound router, run under each account by the user unit <RT·code>Account-Tree_router.service</RT·code>; see <RT·code>design_audio.html</RT·code>.</li>
         <li><RT·code>Account-Tree_install</RT·code> and <RT·code>Account-Tree_teardown</RT·code>: install and remove the programs, the gate and the modules.</li>
         <li>The request gate, <RT·code>Account_Tree__Gate·Request</RT·code>, built by <RT·code>Account_Tree__Gate.make</RT·code> from Man-In-Grey's gate library, with its guard and interpreter.</li>
         <li><RT·code>home_present</RT·code>: the PAM check, to be written.</li>
@@ -810,6 +811,7 @@
         <li><RT·code>ChildAccount.py</RT·code>: making and deallocating a child account.</li>
         <li><RT·code>Share.py</RT·code>: making, ending, recording and applying shares.</li>
         <li><RT·code>Sound.py</RT·code>: the sound of a tree: its buses, the permits and their marks, the connection tables, and the FIFOs between the hub and the accounts.</li>
+        <li><RT·code>Sound·Router.py</RT·code>: the router's plan, made from the gate's answer, and the router that carries it out in the account's PipeWire.</li>
         <li><RT·code>Storage.py</RT·code>, <RT·code>StoragePlug.py</RT·code>, <RT·code>System.py</RT·code> and <RT·code>SameAccount.py</RT·code>: the storage databases and attach; plug and unplug, and the lock; the system database and limits; which accounts are the same account, and the settings carried between systems.</li>
         <li><RT·code>Database.py</RT·code>: the two kinds of database, their hash chain and their schemas. Once the record gate is built, imported by the record interpreter only, so that no root process opens a database.</li>
         <li><RT·code>SystemAccount.py</RT·code>: reading system accounts directly, through the C library, and changing them through wrappers that run the shadow suite's commands for now. In the future each is to be a direct call: the lines of <RT·code>/etc/passwd</RT·code>, <RT·code>/etc/shadow</RT·code>, <RT·code>/etc/group</RT·code> and <RT·code>/etc/gshadow</RT·code> edited under the C library's lock, <RT·code>lckpwdf</RT·code>, each new file written beside the old one and renamed into place.</li>
@@ -852,7 +854,7 @@
       <h2>Not yet built</h2>
 
       <ul>
-        <li>The sound router and the window's Sound panel; see State of the code in <RT·code>design_audio.html</RT·code>.</li>
+        <li>The window's Sound panel, and the sound router's first run on IdealX; see State of the code in <RT·code>design_audio.html</RT·code>.</li>
         <li>Transfer, and opening a child account's file from the window.</li>
         <li><RT·code>rename</RT·code>.</li>
         <li>The database account, the record gate, the answer check and the administrator's gate; until then the request interpreter and <RT·code>Account-Tree_admin</RT·code> open the databases under root.</li>

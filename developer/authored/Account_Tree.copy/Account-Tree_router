@@ -1,0 +1,65 @@
+#!/usr/bin/env -S python3 -B
+# -*- mode: python; coding: utf-8; python-indent-offset: 2; indent-tabs-mode: nil -*-
+"""
+Account-Tree_router - carries out the sound of the account it runs under
+
+usage:
+  Account-Tree_router run      carry out this account's sound until stopped:
+                               its tunnels to the hub, its bit bucket, and the
+                               targets of its programs' streams; in the login
+                               account, the tree's buses and their links.
+                               SIGHUP makes it ask the request gate again
+  Account-Tree_router show     print what the request gate answers this
+                               account's router
+  Account-Tree_router plan     print what the router would run for that answer
+  help | -h                    print this message (also printed when given no
+                               arguments)
+
+The router is started by the user unit Account-Tree_router.service, which
+Account-Tree_admin system configure installs for every account, and which the
+request interpreter tells to reload after a change to the account's sound.
+See developer/design_audio.html and Sound·Router.py.
+"""
+
+import importlib ,json ,os ,pwd ,sys
+sys.path.insert(0 ,os.path.dirname(os.path.realpath(__file__)))
+
+composer = importlib.import_module("Request·Composer")
+router = importlib.import_module("Sound·Router")
+
+
+def log(text):
+  print(f"Account-Tree_router: {text}" ,flush=True)
+
+def fetch():
+  "the route the request gate answers this account, or None, with why logged"
+  try:
+    return composer.sound_route_show()
+  except composer.RequestError as error:
+    log(f"no route: {error}")
+    # of the gate's account of the request, the lines that say why
+    for line in (error.output or "").splitlines():
+      if any(word in line for word in ("broken" ,"refused" ,"error" ,"failed")):
+        log(f"  {line.strip()}")
+    return None
+
+def CLI(argv=None):
+  if argv is None: argv = sys.argv[1:]
+  if not argv or argv[0] in ("help" ,"-h" ,"--help"):
+    print(__doc__.strip()); return 0
+  if len(argv) != 1 or argv[0] not in ("run" ,"show" ,"plan"):
+    print("Error: Account-Tree_router is given run, show or plan." ,file=sys.stderr); return 1
+  name = pwd.getpwuid(os.getuid()).pw_name
+  if argv[0] == "show":
+    route = fetch()
+    if route is None: return 1
+    print(json.dumps(route ,indent=1 ,ensure_ascii=False)); return 0
+  if argv[0] == "plan":
+    route = fetch()
+    if route is None: return 1
+    print(router.plan__of(route ,name).text()); return 0
+  router.Router(name ,fetch ,log).run()
+  return 0
+
+if __name__ == "__main__":
+  sys.exit(CLI())

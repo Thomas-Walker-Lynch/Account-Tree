@@ -33,7 +33,7 @@
       <h1>Purpose</h1>
 
       <p>
-        This document describes how sound reaches the accounts of an account tree. It is a companion to <RT·code>design_Account-Tree.html</RT·code>, whose terms it uses, and it replaces that document's Lease section. The records, the requests and the commands are built; the router, which carries out the connection tables, and the window's Sound panel are not. The section State of the code says which is which, and To verify lists what is to be tried by hand on IdealX before the code that depends on it.
+        This document describes how sound reaches the accounts of an account tree. It is a companion to <RT·code>design_Account-Tree.html</RT·code>, whose terms it uses, and it replaces that document's Lease section. The records, the requests, the commands and the router, which carries out the connection tables, are built; the window's Sound panel is not. The section State of the code says which is which, and To verify lists what is to be tried by hand on IdealX before the code that depends on it.
       </p>
 
       <p>
@@ -73,7 +73,7 @@
       <h1>Two layers</h1>
 
       <p>
-        <em>Account to bus, enforced.</em> Whether an account reaches an end of a bus is decided by its permits and enforced by the kernel. For each bus end an account holds a permit in force for, there is a FIFO between that account and the hub, which only the two can open, and sound flows through it in one direction: from the account at a gather end, to the account at a broadcast end. A child account holds no descriptor to a sound device and is not a client of the hub's PipeWire, so it cannot list, record or reroute anything there.
+        <em>Account to bus, enforced.</em> Whether an account reaches an end of a bus is decided by its permits and enforced by the kernel. For each bus end an account holds a permit in force for, there is a FIFO between that account and the hub, which only the two can open. Sound flows through it in one direction, from the account at a gather end and to the account at a broadcast end; the kernel keeps every other account out of the FIFO, and the tunnels at its two ends keep the direction. A child account holds no descriptor to a sound device and is not a client of the hub's PipeWire, so it cannot list, record or reroute anything there.
       </p>
 
       <p>
@@ -209,52 +209,67 @@
       <h2>In the hub</h2>
 
       <p>
-        Each bus is a null sink in the hub's PipeWire, <RT·code>support.null-audio-sink</RT·code>, which adds together whatever is linked into it and gives the sum on its monitor. The bus nodes are kept out of the hub's defaults, so that none is ever the chosen output or input; were one chosen, its own broadcast end would feed it. A device line in force is a link the hub's router makes: <RT·code>@output</RT·code> on a broadcast end is a loopback from the bus's monitor to the chosen output, and <RT·code>@input</RT·code> on a gather end a loopback from the chosen input into the bus. Each follows the login account's choice as it changes.
+        Each bus is a null node in the hub's PipeWire, <RT·code>support.null-audio-sink</RT·code>, which adds together whatever is linked into its input and gives the sum on its monitor. Its media class is <RT·code>Audio/Bus</RT·code>, a class of Account-Tree's own: the PulseAudio server of PipeWire, through which GNOME's sound settings see devices, lists only sinks and sources, so no bus is offered as an output or an input, and none can be chosen as the hub's own output and broadcast into itself. WirePlumber does not link a node of a class it does not know either, so the router makes every link to and from a bus itself, with <RT·code>pw-link</RT·code>, and removes a link between the nodes it links, the buses and the sides of the tunnels and loopbacks it joins to them, that it did not plan. It leaves every other link alone: the device side of a loopback and the bit bucket are WirePlumber's to link, and the person can choose the bit bucket as the hub's output. Should something keep making a link the router removes, the router removes it three times, then leaves it and says so in its log, so that the router and WirePlumber cannot work against each other without end. The hub's wiring therefore does not depend on WirePlumber's version or configuration.
+      </p>
+
+      <p>
+        A device line in force is a loopback, two streams joined: <RT·code>@output</RT·code> on a broadcast end is a capture stream the router links from the bus's monitor, joined to a playback stream WirePlumber gives the hub's chosen output; <RT·code>@input</RT·code> on a gather end is a capture stream WirePlumber gives the hub's chosen input, joined to a playback stream the router links into the bus. The device side is left to WirePlumber so that it follows the login account's choice as it changes, and the loopback converts between the device's channels and the bus's two.
       </p>
 
       <h2>Between the hub and an account</h2>
 
       <p>
-        For each bus end an account other than the login account holds a full permit for, the request interpreter makes a FIFO, <RT·code>/run/Account-Tree/bus/&lt;account&gt;/&lt;bus number&gt;.&lt;end&gt;</RT·code>, writable by the account and readable by the login account for a gather end, the other way for a broadcast end. The FIFO is owned by the account, with the group root and no group access, and the login account's access is an ACL entry; a share makes another account a member of the login account's own group, and such an account cannot open it. The directories down to it are root's, mode 0711, so an account passes through to its FIFO by name and lists nothing. A FIFO whose owner or ACL entry no longer matches the accounts' system uids, as after a storage is plugged in again, is made again. Each end of a FIFO is a PipeWire pipe-tunnel, with the format fixed at both ends, 16-bit stereo at 48 kHz, so the reader interprets the bytes by its own configuration and the writer has nothing to negotiate:
+        For each bus end an account other than the login account holds a full permit for, the request interpreter makes a FIFO, <RT·code>/run/Account-Tree/bus/&lt;account&gt;/&lt;bus number&gt;.&lt;end&gt;</RT·code>. PipeWire's pipe-tunnel opens a FIFO for reading and writing, whichever way it carries sound, so the FIFO gives both the account and the login account reading and writing: it is owned by the account, mode 0600, with the group root, and the login account's access is an ACL entry. A share makes another account a member of the login account's own group, and such an account cannot open it. The directories down to it are root's, mode 0711, so an account passes through to its FIFO by name and lists nothing. A FIFO whose owner or ACL entry no longer matches the accounts' system uids, as after a storage is plugged in again, is made again. Each end of a FIFO is a pipe-tunnel, with the format fixed at both ends, 16-bit stereo at 48 kHz, so the reader interprets the bytes by its own configuration and the writer has nothing to negotiate:
       </p>
 
       <ul>
-        <li>gather: in the account, a sink named for the bus, whose samples are written to the FIFO; in the hub, a stream that reads the FIFO and plays into the bus;</li>
-        <li>broadcast: in the hub, a stream that captures the bus's monitor and writes the FIFO; in the account, a source named for the bus, whose samples are read from the FIFO.</li>
+        <li>gather: in the account, a sink named for the bus, whose samples are written to the FIFO; in the hub, a stream that reads the FIFO, which the router links into the bus;</li>
+        <li>broadcast: in the hub, a stream the router links from the bus's monitor, which writes the FIFO; in the account, a source named for the bus, whose samples are read from the FIFO.</li>
       </ul>
 
       <p>
-        Each such stream in the hub carries the account's name, so the hub's mixer shows every account on every bus as its own stream, with its own level and mute. Disconnecting one leaves the others alone, and nothing on one account's FIFO reaches another account.
+        Each such stream in the hub carries the account's name and the bus's, so the hub's mixer shows every account on every bus as its own stream, with its own level and mute. Disconnecting one leaves the others alone, and nothing on one account's FIFO reaches another account. The hub reads a gather FIFO as fast as the account writes it: during playback the FIFO was measured holding nothing, so it adds no delay of its own; what delay there is lies in the tunnels' buffers.
       </p>
 
       <h2>Router</h2>
 
       <p>
-        The router runs as a user unit, <RT·code>Account-Tree_router.service</RT·code>, under each account that holds a full permit, the login account included. At start, and each time it is told to reload, it gives a request to the request gate, <RT·code>sound_route_show</RT·code>, and is answered with its account's connection table and, for each bus end the account holds a full permit for, the FIFO to use; the hub's router is answered with the hub's side of every FIFO of the tree, and with the device connections in force. Communication across the privilege boundary goes through the gate; the FIFOs are files because they are the sound channels themselves, and their permissions are the enforcement.
+        The router, <RT·code>Account-Tree_router</RT·code>, with its code in <RT·code>Sound·Router.py</RT·code>, runs under each account from the user unit <RT·code>Account-Tree_router.service</RT·code>, which <RT·code>Account-Tree_admin system configure</RT·code> installs in <RT·code>/etc/systemd/user</RT·code> and enables for every account but the system's own, <RT·code>ConditionUser=!@system</RT·code>. At start, and each time it is told to reload, it gives a request to the request gate, <RT·code>sound_route_show</RT·code>, and is answered with its account's program lines in force and, for each bus end the account holds a full permit for, the FIFO to use; the hub's router is answered with the tree's buses, the hub's side of every FIFO of the tree, and the device connections in force. An account in no tree, or in a tree whose login account holds no grant, is answered no route, and its router waits to be told to reload. Communication across the privilege boundary goes through the gate; the FIFOs are files because they are the sound channels themselves, and their permissions are the enforcement.
       </p>
 
       <p>
-        With its answer, the router writes the PipeWire configuration for each tunnel in its own account's runtime directory, and runs each tunnel as a process of its own, <RT·code>pipewire -c &lt;conf&gt;</RT·code>, so no account's PipeWire is restarted to connect or disconnect. It watches its account's PipeWire for new streams, matches each against the table, and sets the stream's target, as a patch tool does when a person moves a stream by hand. The streams Account-Tree makes carry a property marking them, and the router leaves them alone.
+        From its answer the router makes a plan, which <RT·code>Account-Tree_router plan</RT·code> prints:
+      </p>
+
+      <ul>
+        <li><em>nodes</em>: the buses, in the hub, and the bit bucket, made by one <RT·code>pw-cli</RT·code> the router keeps running, so they go when the router does;</li>
+        <li><em>processes</em>: each tunnel and each loopback, a <RT·code>pipewire -c &lt;conf&gt;</RT·code> process of its own, its configuration in the account's runtime directory, so that one is started or stopped, and a dead one started again, without restarting the account's PipeWire;</li>
+        <li><em>links</em>, in the hub: between the buses and the tunnels and loopbacks;</li>
+        <li><em>rules</em>, in another account: its program lines, each naming the bus end's sink or source.</li>
+      </ul>
+
+      <p>
+        The router watches its account's PipeWire with <RT·code>pw-dump --monitor</RT·code>. As nodes and ports come and go it makes the links that are missing; and to each new stream of a program it gives a target with <RT·code>pw-metadata</RT·code>, as a patch tool does when a person moves a stream by hand: the bus end the first matching line names, matched against the program's <RT·code>application.process.binary</RT·code>, or the bit bucket. A stream is given its target once, when it appears, so a person who moves it afterwards is not overruled, until the router reloads and gives every stream its target again. The streams and nodes Account-Tree makes carry the property <RT·code>account_tree.stream</RT·code>, and the router leaves them alone.
       </p>
 
       <p>
-        The request interpreter, after any change, tells each affected router to reload, with <RT·code>systemctl --user --machine=&lt;account&gt;@ reload Account-Tree_router.service</RT·code>. The signal carries no data; the router asks again.
+        The request interpreter, after any change, tells each affected router to reload, with <RT·code>systemctl --user --machine=&lt;account&gt;@ reload Account-Tree_router.service</RT·code>, which sends it SIGHUP. The signal carries no data; the router asks again.
       </p>
 
       <h2>Bit bucket</h2>
 
       <p>
-        In a child account the bit bucket's two null nodes are the default output and input, and with the bus sinks and sources they are the only audio devices the account has, since it has no access to <RT·code>/dev/snd</RT·code>. Its sound settings show the bus ends it reaches by the buses' names, and a person in that account can move a stream among them with the ordinary tools. A stream that appears before the router has seen it is never heard and hears nothing.
+        In a child account the bit bucket's two null nodes are the default output and input, by their session priority, and with the bus sinks and sources they are the only audio devices the account has, since it has no access to <RT·code>/dev/snd</RT·code>. Its sound settings show the bus ends it reaches by the buses' names, and a person in that account can move a stream among them with the ordinary tools. A stream that appears before the router has seen it is never heard and hears nothing.
       </p>
 
       <p>
-        The hub cannot do the same: its default output and input have to stay the devices the person chose, since that choice is what <RT·code>@output</RT·code> and <RT·code>@input</RT·code> mean. Its router sends every stream of the login account's own programs to the bit bucket, and such a stream reaches the chosen device for the moment before the router moves it.
+        The hub has a bit bucket too, at the lowest priority, so that its default output and input stay the devices the person chose, since that choice is what <RT·code>@output</RT·code> and <RT·code>@input</RT·code> mean. Its router sends every stream of the login account's own programs to the bit bucket, and such a stream reaches the chosen device for the moment before the router moves it.
       </p>
 
       <h2>Session</h2>
 
       <p>
-        The hub's PipeWire runs while the login account has its session at the seat, which is how an account tree is used: the person logs in to the login account and enters the child accounts from it. A child account's router starts with its systemd <RT·code>--user</RT·code> instance, at <RT·code>enter</RT·code>. Two trees with sessions on one seat each have a hub, and only the hub of the seat's active session reaches the devices.
+        The hub's PipeWire runs while the login account has its session at the seat, which is how an account tree is used: the person logs in to the login account and enters the child accounts from it. A child account's router starts with its systemd <RT·code>--user</RT·code> instance, at <RT·code>enter</RT·code>. A systemd user instance already running when the unit is first installed reads it after <RT·code>systemctl --user daemon-reload</RT·code>, and its router is then started with <RT·code>systemctl --user start Account-Tree_router</RT·code>. Two trees with sessions on one seat each have a hub, and only the hub of the seat's active session reaches the devices.
       </p>
 
       <h1>Record</h1>
@@ -340,26 +355,30 @@
       <h1>State of the code</h1>
 
       <ul>
-        <li><em>Built</em>: the records, in the system database and the storage database; <RT·code>Sound.py</RT·code>, the permits and their marks, the connection tables, the buses, and making and deleting the FIFOs; the requests, with their checks in the request guard; the <RT·code>Account-Tree sound</RT·code> and <RT·code>Account-Tree_admin sound</RT·code> commands; the FIFOs made again at attach, and deleted at unplug and deallocation. Tested on a machine with no systemd and no sound.</li>
-        <li><em>Not yet built</em>: the router and its user unit, and with them everything under How sound moves that happens in PipeWire: the bus nodes, the device loopbacks, the tunnels and the bit bucket. A change tells the routers concerned to reload; with no router running, nothing happens.</li>
+        <li><em>Built</em>: the records, in the system database and the storage database; <RT·code>Sound.py</RT·code>, the permits and their marks, the connection tables, the buses, and making and deleting the FIFOs; the requests, with their checks in the request guard; the <RT·code>Account-Tree sound</RT·code> and <RT·code>Account-Tree_admin sound</RT·code> commands; the FIFOs made again at attach, and deleted at unplug and deallocation.</li>
+        <li><em>Built</em>: the router, <RT·code>Account-Tree_router</RT·code> and <RT·code>Sound·Router.py</RT·code>, and its user unit. Tested on a machine running PipeWire 1.0.5 and WirePlumber 0.4 under two accounts, each with its own session bus and no systemd, with null nodes standing in for the speaker and the microphone: a child's program played through system sound to the stand-in speaker, two children played there at once, the stand-in microphone was heard by a child's program through system microphone, a program no line matched went to the bit bucket, and revoking a permit, revoking the grant and issuing it again took effect at the routers' reload. Not yet run on IdealX.</li>
         <li><em>Not yet built</em>: the window's Sound panel, which waits for the window to move onto <RT·code>Request·Composer</RT·code>.</li>
       </ul>
 
       <h1>To verify</h1>
 
       <p>
-        By hand on IdealX, before the code that depends on each:
+        Tried on the test machine, PipeWire 1.0.5 and WirePlumber 0.4, as State of the code describes:
       </p>
 
       <ol>
-        <li>The pipe-tunnel: a FIFO written by a child account's sink and read by a playback stream in the login account plays; two children at once mix; the login account's mixer shows each as its own stream.</li>
-        <li>The latency through the FIFO, and whether a video's sound keeps to its picture. A pipe holds 64 KiB by default, about a third of a second at 16-bit stereo 48 kHz.</li>
-        <li><RT·code>pipewire -c &lt;conf&gt;</RT·code>, run as a process of its own, makes the tunnel in the account's running PipeWire, and ending it removes the tunnel.</li>
-        <li>A null sink can be kept out of the outputs and inputs GNOME's sound settings offer.</li>
-        <li>Setting a stream's target from outside, as the router does, moves a stream already playing.</li>
-        <li>A bus with streams gathered onto it and nothing at its broadcast end runs, clocked by PipeWire's dummy driver, rather than stalling the streams.</li>
-        <li>A child account's WirePlumber, with no access to <RT·code>/dev/snd</RT·code>, starts without complaint, or is told not to look for devices.</li>
+        <li>The pipe-tunnel: a FIFO written by a child account's sink and read in the login account carries the sound intact, in both directions, and two children playing at once are both heard on the speaker, each at full level.</li>
+        <li>The FIFO adds no delay: it held nothing during playback. Whether a video's sound keeps to its picture is still to be seen on IdealX.</li>
+        <li><RT·code>pipewire -c &lt;conf&gt;</RT·code>, run as a process of its own, makes its tunnel in the account's running PipeWire, and ending it removes the tunnel.</li>
+        <li>A node of media class <RT·code>Audio/Bus</RT·code> is not listed by PipeWire's PulseAudio server, which GNOME's sound settings read, so the buses are kept out of the outputs and inputs offered.</li>
+        <li>Setting a stream's target with <RT·code>pw-metadata</RT·code> moves a stream already playing.</li>
+        <li>A bus with streams gathered onto it and nothing at its broadcast end runs, clocked by PipeWire's dummy driver: the streams play at their own pace.</li>
+        <li>A child account's WirePlumber, with no access to sound devices, starts and links its streams.</li>
       </ol>
+
+      <p>
+        Still to try on IdealX, PipeWire 1.2 or later and WirePlumber 0.5: the user unit starting the router at login and at <RT·code>enter</RT·code>; the routers reloading when told; real devices, and the loopbacks following a change of output in GNOME's sound settings; <RT·code>pw-metadata</RT·code> targets under WirePlumber 0.5; the program name Firefox and Chrome give as <RT·code>application.process.binary</RT·code>, which the default line for the microphone matches in full; and a video's lip sync.
+      </p>
 
       <h1>Later feature</h1>
 

@@ -140,9 +140,19 @@ CREATE TABLE IF NOT EXISTS system_account__saved_group (
   PRIMARY KEY (database_uuid ,database_uid ,group_name)
 );
 
--- The resources the system gives to login accounts, a row for each given:
--- for now the resource is sound. Kept here, the system's own, so a storage
--- plugged into another system brings none with it.
+-- A row for each grant the system has issued a login account for a resource,
+-- for now sound. Kept here, the system's own, so a storage plugged into
+-- another system brings no grant with it.
+CREATE TABLE IF NOT EXISTS resource_grant (
+  resource              TEXT NOT NULL,
+  system_account__name  TEXT NOT NULL,
+  issued                TEXT NOT NULL,
+  PRIMARY KEY (resource ,system_account__name)
+);
+
+-- The grants' table under its first name, which nothing reads or writes.
+-- It stays defined because records written before it was renamed write into
+-- it, and the record's replay runs them against this schema.
 CREATE TABLE IF NOT EXISTS resource_allowance (
   resource              TEXT NOT NULL,
   system_account__name  TEXT NOT NULL,

@@ -9,14 +9,21 @@ endpoints to bus ends: the streams of its programs, named by pattern, and,
 for an account holding a device permit, the hub's chosen output or input,
 @output and @input. What an account can connect is decided by its permits:
 
-  allowance       the system's grant of sound to a login account, in the
-                  system database's resource_allowance
-  permit          set or not for one account and one bus end, as 1.gather,
-                  or one device, as @output; in force when set and the
-                  parent's same permit is in force, or, for the login
-                  account, when the system has given the allowance
-  mark            how a permit shows: blank, not set; gray, set and not in
-                  force; full, set and in force
+  grant           a login account's grant of sound, which the system
+                  issues and revokes, recorded in the system database's
+                  resource_grant
+  permit          an account's permit for one bus end, as 1.gather, or one
+                  device, as @output, which an account above it holding the
+                  same permit issues and revokes; in force when the account
+                  holds it and its parent's same permit is in force, or, for
+                  the login account, when it holds the grant
+  connection      a line of an account's connection table, connecting an
+                  endpoint to a bus end
+
+Grant and permit are nouns only: a grant or a permit is issued, held and
+revoked, never "granted" or "permitted", so neither word is ever a verb.
+  mark            how a permit shows: blank, not held; gray, held and not
+                  in force; full, held and in force
 
 For each bus end an account other than the login account holds a full
 permit for, there is a FIFO between it and the hub under
@@ -34,8 +41,8 @@ Work functions, run under root by the request interpreter or by
 Account-Tree_admin, take the lock plug and unplug take, report through log,
 and return False when they stop, having logged why:
 
-  allowance__set     give or take a login account's allowance
-  permit__set        set or clear a permit
+  grant__issue       issue a login account a grant of sound, or revoke it
+  permit__issue      issue an account a permit, or revoke it
   connection__set    replace an account's connection table
   connection__reset  put an account's default table back
   bus__set           make or rename a bus
@@ -49,7 +56,7 @@ Access functions return what they find:
   sound__of          what the window and the commands show of an account,
                      sound__show, asked by an account at or above it
   route__of          what an account's router needs, route__show
-  list__allowance    the allowances the system has given
+  list__grant        the grants the system has issued
 """
 
 import os ,re ,sqlite3 ,subprocess
@@ -171,16 +178,17 @@ def list__child(storage_db ,account):
   return rows(storage_db ,"SELECT * FROM account WHERE parent__database_uid = ? AND state != 'deallocated' ORDER BY name"
               ,(account["database_uid"],))
 
-def is__allowance(system_db ,login_name):
-  return row(system_db ,"SELECT 1 FROM resource_allowance WHERE resource = ? AND system_account__name = ?"
+def has__grant(system_db ,login_name):
+  "whether the login account login_name holds a grant of sound from the system"
+  return row(system_db ,"SELECT 1 FROM resource_grant WHERE resource = ? AND system_account__name = ?"
              ,(RESOURCE ,login_name)) is not None
 
-def list__allowance(system_db):
-  "every allowance this system has given, as rows of resource, system_account__name and given"
-  return rows(system_db ,"SELECT * FROM resource_allowance ORDER BY resource ,system_account__name")
+def list__grant(system_db):
+  "every grant this system has issued, as rows of resource, system_account__name and issued"
+  return rows(system_db ,"SELECT * FROM resource_grant ORDER BY resource ,system_account__name")
 
 def is__configured(storage_db ,login):
-  "whether sound is configured for login's tree: its defaults are made when its first permit is set"
+  "whether sound is configured for login's tree: its defaults are made when its first permit is issued"
   return has__table(storage_db ,login)
 
 def has__table(storage_db ,account):
@@ -244,7 +252,8 @@ def permit__parse(text):
     return ("bus" ,int(number) ,end)
   raise ValueError(f"the permit {text!r} is neither <bus number>.gather, <bus number>.broadcast, @output nor @input")
 
-def is__permit_set(storage_db ,account ,permit):
+def holds__permit(storage_db ,account ,permit):
+  "whether account holds the permit, in force or not"
   kind ,number ,name = permit__parse(permit)
   if kind == "device":
     return row(storage_db ,"SELECT 1 FROM sound_permit_device WHERE database_uid = ? AND device = ?"
@@ -253,29 +262,29 @@ def is__permit_set(storage_db ,account ,permit):
              ,(account["database_uid"] ,number ,name)) is not None
 
 def is__in_force(system_db ,storage_db ,account ,permit ,login_name):
-  "whether account's permit is set, and every same permit above it up to the login account, which the system allows sound"
+  "whether account holds the permit, and every account above it the same permit, up to the login account, which holds the grant"
   each = account
   for _ in range(DEPTH_MAX):
-    if not is__permit_set(storage_db ,each ,permit):
+    if not holds__permit(storage_db ,each ,permit):
       return False
     if is__login(each):
-      return is__allowance(system_db ,login_name)
+      return has__grant(system_db ,login_name)
     each = parent__of(storage_db ,each)
     if each is None:
       return False
   return False
 
 def mark__of(system_db ,storage_db ,account ,permit ,login_name):
-  if not is__permit_set(storage_db ,account ,permit):
+  if not holds__permit(storage_db ,account ,permit):
     return MARK__BLANK
   return MARK__FULL if is__in_force(system_db ,storage_db ,account ,permit ,login_name) else MARK__GRAY
 
-def permit_set__problem(storage_db ,asking ,account ,permit):
+def permit_issue__problem(storage_db ,asking ,account ,permit):
   """
-  The problems, as messages, with asking setting or clearing account's
-  permit. The login account of the tree sets every permit in it, its own
-  included; another account sets those of the accounts below it, for a
-  permit it holds itself, gray or full.
+  The problems, as messages, with asking issuing account a permit, or
+  revoking it. The login account of the tree issues and revokes every
+  permit in it, its own included; another account those of the accounts
+  below it, for a permit it holds itself, in force or not.
   """
   try:
     kind ,number ,_ = permit__parse(permit)
@@ -290,11 +299,11 @@ def permit_set__problem(storage_db ,asking ,account ,permit):
   list__problem = []
   if not is__login(asking):
     if account["database_uid"] == asking["database_uid"]:
-      list__problem.append("an account's own permits are set by an account above it")
+      list__problem.append("an account's own permits are issued and revoked by an account above it")
     elif not is__below(storage_db ,account ,asking):
       list__problem.append(f"{account['name']} is not below {asking['name']}")
-    if not is__permit_set(storage_db ,asking ,permit):
-      list__problem.append(f"{asking['name']} does not hold the permit {permit}, so it does not give it")
+    if not holds__permit(storage_db ,asking ,permit):
+      list__problem.append(f"{asking['name']} does not hold the permit {permit}, so it does not issue or revoke it")
   if kind == "bus" and bus__find(list__bus(storage_db ,login) ,str(number)) is None:
     list__problem.append(f"the tree has no bus {number}")
   return list__problem
@@ -408,7 +417,7 @@ def connection_set__problem(storage_db ,asking ,account ,text):
   if account["database_uid"] != asking["database_uid"] and not is__below(storage_db ,account ,asking):
     return [f"{account['name']} is neither {asking['name']} nor below it"]
   if not has__table(storage_db ,account):
-    return [f"{account['name']} has no connection table; it is made when its first permit is set"]
+    return [f"{account['name']} has no connection table; it is made when its first permit is issued"]
   if text is None:
     return []
   return connection__parse(text ,list__bus(storage_db ,login) ,is__login(account))[1]
@@ -458,11 +467,11 @@ def sound__show(system_db ,storage_db ,account):
   list__permit_ = list__permit(list__bus_)
   list__tree_ = list__tree(storage_db ,login)
   def holder(permit):
-    return [system_name__of(system_db ,database_uuid ,a) for a in list__tree_ if is__permit_set(storage_db ,a ,permit)]
+    return [system_name__of(system_db ,database_uuid ,a) for a in list__tree_ if holds__permit(storage_db ,a ,permit)]
   list__show = [account] + list__child(storage_db ,account)
   return {
     "login": login_name
-    ,"is__allowance": is__allowance(system_db ,login_name)
+    ,"has__grant": has__grant(system_db ,login_name)
     ,"is__configured": is__configured(storage_db ,login)
     ,"list__bus": [{"number": bus["number"] ,"name": bus["name"]
                     ,"list__gather": holder(f"{bus['number']}.gather")
@@ -486,7 +495,7 @@ def fifo__desired(system_db ,storage_db ,login):
   """
   database_uuid = uuid__of(storage_db)
   login_name = system_name__of(system_db ,database_uuid ,login)
-  if not is__configured(storage_db ,login) or not is__allowance(system_db ,login_name):
+  if not is__configured(storage_db ,login) or not has__grant(system_db ,login_name):
     return {}
   result = {}
   list__bus_ = list__bus(storage_db ,login)
@@ -511,7 +520,8 @@ def route__show(system_db ,storage_db ,account):
   login = login__of(storage_db ,account)
   database_uuid = uuid__of(storage_db)
   login_name = system_name__of(system_db ,database_uuid ,login)
-  list__bus_ = list__bus(storage_db ,login) if is__configured(storage_db ,login) else []
+  # with no grant held, nothing is in force, and the hub makes no bus
+  list__bus_ = list__bus(storage_db ,login) if is__configured(storage_db ,login) and has__grant(system_db ,login_name) else []
   is__hub = is__login(account)
   name = system_name__of(system_db ,database_uuid ,account)
   def in_force(a ,permit):
@@ -623,11 +633,11 @@ def table__write(t ,account ,list__line_ ,is__new=False):
               " VALUES (? ,? ,? ,? ,? ,?)"
               ,(account["database_uid"] ,number ,line["end"] ,line["bus__number"] ,line["endpoint__kind"] ,line["endpoint"]))
 
-def allowance__set(login_name ,is__given ,log ,preview):
+def grant__issue(login_name ,is__issue ,log ,preview):
   """
-  Give or take the allowance of sound to the login account login_name.
-  Giving it to a tree sound is not configured for makes the tree's
-  defaults. Returns True when it was done, or would be.
+  Issue the login account login_name a grant of sound, or, with is__issue
+  False, revoke it. Issuing a grant to a tree sound is not configured for
+  makes the tree's defaults. Returns True when it was done, or would be.
   """
   with StoragePlug.Lock():
     system_db = open_system_database(log)
@@ -643,31 +653,33 @@ def allowance__set(login_name ,is__given ,log ,preview):
       _ ,storage_db ,account ,login ,_ = found
       if not is__login(account):
         log.error(login_name ,"a child account; the system gives sound to login accounts only"); return False
-    if is__allowance(system_db ,login_name) == is__given:
-      log.line("kept" ,login_name ,f"sound already {'given' if is__given else 'not given'}")
+    if has__grant(system_db ,login_name) == is__issue:
+      log.line("kept" ,login_name ,f"{'holds a grant of sound already' if is__issue else 'holds no grant of sound'}")
     else:
-      with system_db.transaction(f"{'give' if is__given else 'take'} sound {'to' if is__given else 'from'} {login_name}" ,preview) as t:
-        if is__given:
-          t.execute("INSERT INTO resource_allowance(resource ,system_account__name ,given) VALUES (? ,? ,?)"
+      with system_db.transaction(f"{'issue' if is__issue else 'revoke'} the grant of sound of {login_name}" ,preview) as t:
+        if is__issue:
+          t.execute("INSERT INTO resource_grant(resource ,system_account__name ,issued) VALUES (? ,? ,?)"
                     ,(RESOURCE ,login_name ,Database.now()))
         else:
-          t.execute("DELETE FROM resource_allowance WHERE resource = ? AND system_account__name = ?" ,(RESOURCE ,login_name))
-      log.line("given" if is__given else "taken" ,login_name ,"the allowance of sound")
+          t.execute("DELETE FROM resource_grant WHERE resource = ? AND system_account__name = ?" ,(RESOURCE ,login_name))
+        # a row the table holds under its first name, from before the rename, goes
+        t.execute("DELETE FROM resource_allowance WHERE resource = ? AND system_account__name = ?" ,(RESOURCE ,login_name))
+      log.line("issued" if is__issue else "revoked" ,login_name ,"its grant of sound")
     if found is None:
       log.line("kept" ,login_name ,"its storage is unplugged; its tree comes up for sound when it is plugged in")
       return True
-    if is__given and not is__configured(storage_db ,login):
+    if is__issue and not is__configured(storage_db ,login):
       with storage_db.transaction(f"configure sound for the tree of {login_name}" ,preview) as t:
         configure(t ,login)
       log.line("made" ,f"the sound of {login_name}'s tree" ,"its default buses, its permits and its table")
     return fifo__sync(system_db ,storage_db ,login ,log ,preview)
 
-def permit__set(asking ,name ,permit ,is__set ,log ,preview):
+def permit__issue(asking ,name ,permit ,is__issue ,log ,preview):
   """
-  Set or clear name's permit, asked by the system account asking. The first
-  permit set in a tree makes the tree's defaults; the first set for an
-  account makes its connection table. Returns True when it was done, or
-  would be.
+  Issue name a permit, or, with is__issue False, revoke it, asked by the
+  system account asking. The first permit issued in a tree makes the tree's
+  defaults; the first issued to an account makes its connection table.
+  Returns True when it was done, or would be.
   """
   with StoragePlug.Lock():
     found = found__tree(name ,log)
@@ -675,34 +687,34 @@ def permit__set(asking ,name ,permit ,is__set ,log ,preview):
     system_db ,storage_db ,account ,login ,login_name = found
     account__asking = found__asking(asking ,storage_db ,login ,log)
     if account__asking is None: return False
-    list__problem = permit_set__problem(storage_db ,account__asking ,account ,permit)
+    list__problem = permit_issue__problem(storage_db ,account__asking ,account ,permit)
     if list__problem:
       for p in list__problem: log.error(name ,p)
       return False
     kind ,number ,which = permit__parse(permit)
-    with storage_db.transaction(f"{'set' if is__set else 'clear'} the sound permit {permit} of {name}" ,preview) as t:
+    with storage_db.transaction(f"{'issue' if is__issue else 'revoke'} the sound permit {permit} of {name}" ,preview) as t:
       if not is__configured(storage_db ,login):
         configure(t ,login)
         log.line("made" ,f"the sound of {login_name}'s tree" ,"its default buses, its permits and its table")
-      is__now = is__permit_set(storage_db ,account ,permit)
-      if is__now == is__set:
-        log.line("kept" ,f"{name} {permit}" ,f"already {'set' if is__set else 'clear'}")
-      elif is__set:
+      is__now = holds__permit(storage_db ,account ,permit)
+      if is__now == is__issue:
+        log.line("kept" ,f"{name} {permit}" ,f"{'held already' if is__issue else 'not held'}")
+      elif is__issue:
         if kind == "device":
           t.execute("INSERT INTO sound_permit_device(database_uid ,device ,made) VALUES (? ,? ,?)"
                     ,(account["database_uid"] ,which ,Database.now()))
         else:
           t.execute("INSERT INTO sound_permit_bus_end(database_uid ,bus__number ,bus_end ,made) VALUES (? ,? ,? ,?)"
                     ,(account["database_uid"] ,number ,which ,Database.now()))
-        log.line("set" ,f"{name} {permit}")
+        log.line("issued" ,f"{name} {permit}")
       else:
         if kind == "device":
           t.execute("DELETE FROM sound_permit_device WHERE database_uid = ? AND device = ?" ,(account["database_uid"] ,which))
         else:
           t.execute("DELETE FROM sound_permit_bus_end WHERE database_uid = ? AND bus__number = ? AND bus_end = ?"
                     ,(account["database_uid"] ,number ,which))
-        log.line("cleared" ,f"{name} {permit}")
-      if is__set and not has__table(storage_db ,account):
+        log.line("revoked" ,f"{name} {permit}")
+      if is__issue and not has__table(storage_db ,account):
         table__write(t ,account ,connection__default(list__bus(storage_db ,login) ,is__login(account)) ,is__new=True)
         log.line("made" ,f"the connection table of {name}" ,"from the default lines")
     return fifo__sync(system_db ,storage_db ,login ,log ,preview)
@@ -834,26 +846,27 @@ def directory__make(dirpa__account):
 
 def fifo__make(path ,owner ,login_name ,end ,log ,preview):
   """
-  Make the FIFO at path between the account owner and the hub, login_name:
-  the account writes it and the hub reads it for a gather end, the other way
-  for a broadcast end. The FIFO is the account's, with the hub's access
-  through an ACL entry, so no group, and no account a share makes a member
-  of one, opens it.
+  Make the FIFO at path between the account owner and the hub, login_name.
+  Sound goes from the account to the hub on a gather end, the other way on a
+  broadcast end; that direction is kept by the tunnels at the two ends, as
+  PipeWire's pipe-tunnel opens a FIFO for reading and writing whichever way
+  it carries sound, so both accounts are given both. The FIFO is the
+  account's, with the hub's access through an ACL entry, so no group, and
+  no account a share makes a member of one, opens it.
   """
   entry__owner = sa.system_account(owner)
   entry__login = sa.system_account(login_name)
   if entry__owner is None or entry__login is None:
     log.error(str(path) ,f"{owner if entry__owner is None else login_name} has no system account here"); return False
-  mode__owner ,access__login = (0o200 ,"r") if end == END__GATHER else (0o400 ,"w")
   def make():
     directory__make(path.parent)
     os.mkfifo(path ,0)
     os.chown(path ,entry__owner.pw_uid ,0)
-    os.chmod(path ,mode__owner)
-    subprocess.run(["setfacl" ,"-m" ,f"u:{entry__login.pw_uid}:{access__login}" ,str(path)] ,check=True
+    os.chmod(path ,0o600)
+    subprocess.run(["setfacl" ,"-m" ,f"u:{entry__login.pw_uid}:rw" ,str(path)] ,check=True
                    ,stdin=subprocess.DEVNULL ,stdout=subprocess.DEVNULL)
   if not act(log ,preview ,str(path) ,make): return False
-  log.line("made" ,str(path) ,f"{owner} {'writes' if end == END__GATHER else 'reads'} it, {login_name} {'reads' if end == END__GATHER else 'writes'} it")
+  log.line("made" ,str(path) ,f"sound from {owner} to {login_name}" if end == END__GATHER else f"sound from {login_name} to {owner}")
   return True
 
 def is__fifo_current(path ,owner ,login_name ,end):
@@ -872,7 +885,7 @@ def is__fifo_current(path ,owner ,login_name ,end):
     return False
   if not stat.S_ISFIFO(st.st_mode) or st.st_uid != entry__owner.pw_uid:
     return False
-  access = "r--" if end == END__GATHER else "-w-"
+  access = "rw-"
   done = subprocess.run(["getfacl" ,"--numeric" ,"--omit-header" ,str(path)] ,capture_output=True ,text=True)
   return done.returncode == 0 and f"user:{entry__login.pw_uid}:{access}" in done.stdout.split()
 

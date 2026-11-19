@@ -38,10 +38,11 @@ who asked and what the account tree allows. A journal holds one request.
                        tree's buses with the accounts holding each end, the
                        marks of the permits of account_name and its child
                        accounts, and account_name's connection table
-  sound_permit_set(account_name ,permit ,is__set)
-                       set or clear one of account_name's permits: a bus end,
-                       as 1.gather or 2.broadcast, or a device, @output or
-                       @input
+  sound_permit_issue(account_name ,permit)
+  sound_permit_revoke(account_name ,permit)
+                       issue account_name a permit, or revoke it: for a bus
+                       end, as 1.gather or 2.broadcast, or a device, @output
+                       or @input
   sound_connection_set(account_name ,text__connection)
                        replace account_name's connection table with the text
   sound_connection_reset(account_name)
@@ -72,7 +73,6 @@ DEFINITION = {
     ,["list__account_name" ,["list" ,"text"]]
     ,["made" ,["dictionary" ,["name" ,"text"] ,["database_uid" ,"integer"] ,["system_uid" ,"integer"]]]
     ,["permit" ,"text"]
-    ,["is__set" ,"boolean"]
     ,["text__connection" ,"text"]
     ,["bus__number" ,"integer"]
     ,["bus__name" ,"text"]
@@ -81,7 +81,7 @@ DEFINITION = {
     ,["sound_device" ,["dictionary" ,["device" ,"text"] ,["list__holder" ,["list" ,"text"]]]]
     ,["sound_mark" ,["dictionary" ,["permit" ,"text"] ,["mark" ,"text"]]]
     ,["sound_row" ,["dictionary" ,["name" ,"text"] ,["list__mark" ,["list" ,"sound_mark"]]]]
-    ,["sound" ,["dictionary" ,["login" ,"text"] ,["is__allowance" ,"boolean"] ,["is__configured" ,"boolean"]
+    ,["sound" ,["dictionary" ,["login" ,"text"] ,["has__grant" ,"boolean"] ,["is__configured" ,"boolean"]
                 ,["list__bus" ,["list" ,"sound_bus"]] ,["list__device" ,["list" ,"sound_device"]]
                 ,["list__row" ,["list" ,"sound_row"]] ,["has__table" ,"boolean"] ,["connection" ,"text"]]]
     ,["route_bus" ,["dictionary" ,["number" ,"integer"] ,["name" ,"text"]]]
@@ -98,7 +98,7 @@ DEFINITION = {
     ,["format__account" ,["in" ,"account_name"]]
     ,["format__share" ,["in" ,"account_name"] ,["in" ,"list__account_name"]]
     ,["format__sound_show" ,["in" ,"account_name"] ,["out" ,"sound"]]
-    ,["format__sound_permit_set" ,["in" ,"account_name"] ,["in" ,"permit"] ,["in" ,"is__set"]]
+    ,["format__sound_permit" ,["in" ,"account_name"] ,["in" ,"permit"]]
     ,["format__sound_connection_set" ,["in" ,"account_name"] ,["in" ,"text__connection"]]
     ,["format__sound_bus_set" ,["in" ,"bus__number"] ,["in" ,"bus__name"]]
     ,["format__sound_bus_remove" ,["in" ,"bus__number"]]
@@ -112,7 +112,8 @@ DEFINITION = {
     ,"share_with": "format__share"
     ,"share_remove": "format__share"
     ,"sound_show": "format__sound_show"
-    ,"sound_permit_set": "format__sound_permit_set"
+    ,"sound_permit_issue": "format__sound_permit"
+    ,"sound_permit_revoke": "format__sound_permit"
     ,"sound_connection_set": "format__sound_connection_set"
     ,"sound_connection_reset": "format__account"
     ,"sound_bus_set": "format__sound_bus_set"

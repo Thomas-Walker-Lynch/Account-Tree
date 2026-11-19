@@ -18,7 +18,7 @@ person's account, which the gate learns from the kernel as its real uid.
   share_with          ask to share an account with others
   share_remove        ask to end shares
   sound_show          ask what the window shows of an account's sound
-  sound_permit_set    ask to set or clear a permit
+  sound_permit_issue  ask to issue a permit, or to revoke it
   sound_connection_set   ask to replace a connection table; with text None,
                       to put the default one back
   sound_bus_set       ask to make or rename a bus
@@ -181,10 +181,14 @@ def sound_show(account_name):
   "Ask what the window shows of account_name's sound; the sound value of Request·Language.py. Raises RequestError."
   return request(f"the request to show the sound of {account_name}" ,"sound_show" ,[account_name] ,"sound")[0]
 
-def sound_permit_set(account_name ,permit ,is__set):
-  "Ask to set or clear account_name's permit, as 1.gather or @output. Returns output. Raises RequestError."
-  return request(f"the request to {'set' if is__set else 'clear'} the permit {permit} of {account_name}"
-                 ,"sound_permit_set" ,[account_name ,permit ,is__set])[1]
+def sound_permit_issue(account_name ,permit ,is__issue):
+  """
+  Ask to issue account_name the permit, as 1.gather or @output, or, with
+  is__issue False, to revoke it. Returns output. Raises RequestError.
+  """
+  if is__issue:
+    return request(f"the request to issue {account_name} the permit {permit}" ,"sound_permit_issue" ,[account_name ,permit])[1]
+  return request(f"the request to revoke the permit {permit} of {account_name}" ,"sound_permit_revoke" ,[account_name ,permit])[1]
 
 def sound_connection_set(account_name ,text):
   """

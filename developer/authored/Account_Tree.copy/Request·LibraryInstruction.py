@@ -26,8 +26,8 @@ machinectl shell does, and as systemd-machined does for it:
      interpreter sends it to the gate beside the result, and the gate hands
      it to the asking program, which relays its own terminal to it.
 
-A process the session starts runs under the child account. The grant of the
-display is not taken back when the session ends; it lasts as long as the
+A process the session starts runs under the child account. The display, once
+given to the account, is not taken back when the session ends; it lasts as long as the
 display does.
 
 make_child_account and deallocate call the work functions of ChildAccount.py,
@@ -100,23 +100,23 @@ class LibraryInstruction:
   # ------------------------------------------------------------------------------
   # the display
 
-  def display__grant(self ,child ,display):
+  def display__give(self ,child ,display):
     asking = self._asking
     if display["wayland_display"]:
       socket = display["wayland_display"]
       run(self._log ,["setfacl" ,"-m" ,f"u:{child.pw_uid}:x" ,os.path.dirname(socket)] ,"the Wayland socket's directory")
       run(self._log ,["setfacl" ,"-m" ,f"u:{child.pw_uid}:rw" ,socket] ,"the Wayland socket")
-      self._log("granted" ,f"{child.pw_name} the Wayland socket {socket}")
+      self._log("given" ,f"{child.pw_name} the Wayland socket {socket}")
     if display["display"]:
       env = {"PATH": "/usr/bin:/bin" ,"HOME": asking.pw_dir ,"DISPLAY": display["display"]}
       if display["xauthority"]:
         env["XAUTHORITY"] = display["xauthority"]
       # under the asking account: its X authority file is its own, and the
-      # grant is made with no more right than the display's owner has
+      # display is given with no more right than the display's owner has
       run(self._log ,["xhost" ,f"+SI:localuser:{child.pw_name}"] ,f"the X display {display['display']}"
           ,env=env ,cwd="/" ,user=asking.pw_uid ,group=asking.pw_gid
           ,extra_groups=os.getgrouplist(asking.pw_name ,asking.pw_gid))
-      self._log("granted" ,f"{child.pw_name} the X display {display['display']}")
+      self._log("given" ,f"{child.pw_name} the X display {display['display']}")
 
   # ------------------------------------------------------------------------------
   # the instructions
@@ -125,7 +125,7 @@ class LibraryInstruction:
     child = sa.system_account(account_name)
     if child is None:
       raise RequestError(f"there is no system account {account_name}")
-    self.display__grant(child ,display)
+    self.display__give(child ,display)
 
     fd__master ,fd__slave = os.openpty()
     self._list__fd__close += [fd__master ,fd__slave]
@@ -202,10 +202,15 @@ class LibraryInstruction:
       raise log.failure(f"showing the sound of {account_name}")
     sound.append(value)
 
-  def sound_permit_set(self ,account_name ,permit ,is__set):
+  def sound_permit_issue(self ,account_name ,permit):
     log = LogInterpreter(self._log)
-    if not Sound.permit__set(self._asking.pw_name ,account_name ,permit ,is__set ,log ,False):
-      raise log.failure(f"{'setting' if is__set else 'clearing'} the permit {permit} of {account_name}")
+    if not Sound.permit__issue(self._asking.pw_name ,account_name ,permit ,True ,log ,False):
+      raise log.failure(f"issuing {account_name} the permit {permit}")
+
+  def sound_permit_revoke(self ,account_name ,permit):
+    log = LogInterpreter(self._log)
+    if not Sound.permit__issue(self._asking.pw_name ,account_name ,permit ,False ,log ,False):
+      raise log.failure(f"revoking the permit {permit} of {account_name}")
 
   def sound_connection_set(self ,account_name ,text__connection):
     log = LogInterpreter(self._log)

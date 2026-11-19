@@ -29,10 +29,11 @@ the definition in Request·Language.py. They are LIST__CHECK:
                                       sharing account
                  sound_show           the account is the asking account or
                                       below it, in a tree on its storage
-                 sound_permit_set     the login account of the tree sets
-                                      every permit in it; another account
-                                      sets those of the accounts below it,
-                                      for a permit it holds
+                 sound_permit_issue   the login account of the tree issues
+                 sound_permit_revoke  and revokes every permit in it;
+                                      another account those of the
+                                      accounts below it, for a permit it
+                                      holds
                  sound_connection_set the account is the asking account or
                  sound_connection_reset below it and has a table; a new
                                       table's lines are well formed, name
@@ -141,13 +142,13 @@ def check_language(list__instruction_view ,data ,constraint ,gate_invoking_accou
       list__problem.append(at + "an account is given twice")
     if account_name in list__member:
       list__problem.append(at + f"{account_name} is given as sharing with itself")
-  elif view.operation in ("sound_show" ,"sound_permit_set" ,"sound_connection_set" ,"sound_connection_reset"):
+  elif view.operation in ("sound_show" ,"sound_permit_issue" ,"sound_permit_revoke" ,"sound_connection_set" ,"sound_connection_reset"):
     at = f"@{view.index} {view.operation}: "
     value = literal(view)
     problem = valid_name(value[0])
     if problem:
       list__problem.append(at + f"account {clean(repr(value[0]))}: {problem}")
-    if view.operation == "sound_permit_set":
+    if view.operation in ("sound_permit_issue" ,"sound_permit_revoke"):
       try:
         Sound.permit__parse(value[1])
       except ValueError as error:
@@ -248,8 +249,8 @@ def sound__problem(system_db ,asking ,operation ,value):
       account = storage_db.execute("SELECT * FROM account WHERE database_uid = ?" ,(row["database_uid"],)).fetchone()
     if operation == "sound_show":
       return []
-    if operation == "sound_permit_set":
-      return Sound.permit_set__problem(storage_db ,account__asking ,account ,value[1])
+    if operation in ("sound_permit_issue" ,"sound_permit_revoke"):
+      return Sound.permit_issue__problem(storage_db ,account__asking ,account ,value[1])
     if operation == "sound_connection_set":
       return Sound.connection_set__problem(storage_db ,account__asking ,account ,value[1])
     if operation == "sound_connection_reset":

@@ -54,14 +54,15 @@ Usage: Account-Tree <command> [argument ...]
                        print the sound of <account>: its tree's buses and who
                        holds a permit for each end, the marks of the permits of
                        <account> and its child accounts, and its connection
-                       table. A mark is full, set and in force; gray, set and
-                       not in force; or blank, not set
-  sound permit <account> <bus> gather|broadcast on|off
-  sound permit <account> @output|@input on|off
-                       set or clear a permit of <account>: for an end of a bus,
-                       named by number or name, or for a device of the hub. The
-                       tree's login account sets every permit; another account
-                       sets the permits it holds for the accounts below it
+                       table. A mark is full, the permit held and in force;
+                       gray, held and not in force; or blank, not held
+  sound permit issue|revoke <account> <bus> gather|broadcast
+  sound permit issue|revoke <account> @output|@input
+                       issue <account> a permit, or revoke it: for an end of a
+                       bus, named by number or name, or for a device of the hub.
+                       The tree's login account issues and revokes every permit
+                       in it; another account, those it holds, for the accounts
+                       below it
   sound connection show <account>
                        print the connection table of <account>
   sound connection set <account> <file>
@@ -304,12 +305,19 @@ def sound__print_bus(sound):
   for device in sound["list__device"]:
     print(f"  {device['device']:<29}{', '.join(device['list__holder']) or '-'}")
 
+def sound__print_grant(sound):
+  if sound["has__grant"]:
+    print(f"grant  held: {sound['login']}, the login account of the tree, holds this system's grant of sound")
+  else:
+    print(f"grant  none: {sound['login']}, the login account of the tree, holds no grant of sound from this system,"
+          " so no permit in it is in force")
+    print(f"       the administrator issues one with: Account-Tree_admin sound grant issue {sound['login']}")
+
 def sound__print(sound ,name):
   "print what sound show prints, from the value sound_show returns"
-  allowance = "given" if sound["is__allowance"] else f"not given; the administrator gives it with Account-Tree_admin sound allow {sound['login']}"
-  print(f"tree of {sound['login']}: sound {allowance}")
+  sound__print_grant(sound)
   if not sound["is__configured"]:
-    print("  sound is not configured for the tree yet; the default buses below are made when its first permit is set")
+    print("  sound is not configured for the tree yet; the default buses below are made when its first permit is issued")
   sound__print_bus(sound)
   list__permit = [m["permit"] for m in sound["list__row"][0]["list__mark"]]
   width = max(len(r["name"]) for r in sound["list__row"]) + 2
@@ -321,7 +329,7 @@ def sound__print(sound ,name):
 
 def sound__print_connection(sound ,name):
   if not sound["has__table"]:
-    print(f"{name} has no connection table; it is made when its first permit is set")
+    print(f"{name} has no connection table; it is made when its first permit is issued")
     return
   print(f"connection table of {name}")
   for line in sound["connection"].splitlines():
@@ -350,12 +358,13 @@ def command__sound(rest):
       sound__print(composer.sound_show(name) ,name)
       return 0
     if word == "permit":
-      if len(rest) not in (3 ,4) or rest[-1] not in ("on" ,"off"):
-        print("Error: sound permit is given <account> <bus> gather|broadcast on|off, or <account> @output|@input on|off." ,file=sys.stderr)
+      if len(rest) not in (3 ,4) or rest[0] not in ("issue" ,"revoke"):
+        print("Error: sound permit is given issue|revoke <account> <bus> gather|broadcast, or issue|revoke <account> @output|@input." ,file=sys.stderr)
         return 1
+      verb ,rest = rest[0] ,rest[1:]
       name = account_name(rest[0])
       if name is None: return 1
-      if len(rest) == 3:
+      if len(rest) == 2:
         permit = rest[1]
         if not permit.startswith("@"):
           print("Error: a device is @output or @input; a bus end is given as <bus> gather|broadcast." ,file=sys.stderr); return 1
@@ -366,7 +375,7 @@ def command__sound(rest):
         if number is None:
           print(f"Error: the tree has no bus {rest[1]!r}." ,file=sys.stderr); return 1
         permit = f"{number}.{rest[2]}"
-      report(composer.sound_permit_set(name ,permit ,rest[-1] == "on"))
+      report(composer.sound_permit_issue(name ,permit ,verb == "issue"))
       return 0
     if word == "connection":
       if len(rest) < 2 or rest[0] not in ("show" ,"set" ,"reset"):
@@ -398,7 +407,9 @@ def command__sound(rest):
     if verb == "show":
       if rest:
         print("Error: sound bus show is given nothing more." ,file=sys.stderr); return 1
-      sound__print_bus(composer.sound_show(current))
+      sound = composer.sound_show(current)
+      sound__print_grant(sound)
+      sound__print_bus(sound)
       return 0
     if verb == "set":
       if len(rest) != 2 or not rest[0].isdigit():

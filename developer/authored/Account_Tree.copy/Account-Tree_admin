@@ -115,13 +115,17 @@ Commands:
                                  before the storage database kept shares, is not made
                                  again after an unplug. Run it once, while the storage is
                                  attached
-  sound allow <login account>    give the login account sound: it, and the accounts
-                                 below it it gives permits to, reach the buses of its
-                                 tree. The allowance is this system's; a storage
-                                 plugged into another system brings none with it
-  sound deny <login account>     take the allowance of sound back; the tree's buses,
+  sound grant issue <login account>
+                                 issue the login account a grant of sound: with it,
+                                 the login account, and the accounts below it holding
+                                 permits it issues, reach the buses of its tree. A
+                                 grant is this system's; a storage plugged into
+                                 another system brings no grant with it
+  sound grant revoke <login account>
+                                 revoke the login account's grant; the tree's buses,
                                  permits and connection tables stay, dormant
-  sound show                     print the login accounts this system gives sound
+  sound grant show               print the login accounts holding this system's grant
+                                 of sound
   same-account show [storage <dirp_storage>]
                                  print which accounts are the same account here
   same-account suggest storage <dirp_storage>
@@ -211,7 +215,7 @@ from Database import DatabaseError
 OBJECT = ("system" ,"storage" ,"account" ,"same-account" ,"limit" ,"share" ,"sound")
 
 # commands that only read, and so may be run by anyone with read access
-READ_ONLY = ("system show" ,"storage show" ,"same-account show" ,"same-account suggest" ,"sound show")
+READ_ONLY = ("system show" ,"storage show" ,"same-account show" ,"same-account suggest" ,"sound grant show")
 
 
 def print_help():
@@ -294,7 +298,8 @@ def CLI(argv=None):
   if command in OBJECT and rest:
     command ,rest = f"{command} {rest[0]}" ,rest[1:]
 
-  if command not in READ_ONLY and os.geteuid() != 0 and not preview:
+  is__read_only = command in READ_ONLY or " ".join([command] + rest[:1]) in READ_ONLY
+  if not is__read_only and os.geteuid() != 0 and not preview:
     print("Error: Account-Tree_admin changes the system and must be run under root." ,file=sys.stderr)
     return 1
 
@@ -310,8 +315,8 @@ def CLI(argv=None):
       return SameAccount.same_account__show({"dirp__storage": rest[1]} if rest else None)
     if command == "same-account suggest" and len(rest) == 2 and rest[0] == "storage":
       return SameAccount.same_account__suggest({"dirp__storage": rest[1]})
-    if command == "sound show" and not rest:
-      return allowance__print(log)
+    if command == "sound grant" and rest == ["show"]:
+      return grant__print(log)
 
     # ---- changes
     if command == "system make" and len(rest) in (0 ,2):
@@ -383,27 +388,30 @@ def CLI(argv=None):
     elif command == "storage unplug" and len(rest) == 1:
       header(command ,None ,preview)
       StoragePlug.unplug(rest[0] ,log ,preview)
-    elif command in ("sound allow" ,"sound deny") and len(rest) == 1:
-      header(command ,None ,preview)
-      Sound.allowance__set(rest[0] ,command == "sound allow" ,log ,preview)
+    elif command == "sound grant" and len(rest) == 2 and rest[0] in ("issue" ,"revoke"):
+      header(f"{command} {rest[0]}" ,None ,preview)
+      Sound.grant__issue(rest[1] ,rest[0] == "issue" ,log ,preview)
     elif command == "limit set" and len(rest) == 2:
       header(command ,None ,preview)
       System.limit__set(rest[0] ,integer(rest[1] ,"<maximum>") ,log ,preview)
     else:
       return usage_error(command)
+  except PermissionError as error:
+    print(f"Error: {error.filename}: permission denied; the databases are read under root." ,file=sys.stderr)
+    return 1
   except (DatabaseError ,ValueError) as error:
     log.error(command ,str(error))
   return log.summary()
 
-def allowance__print(log):
-  "print the allowances this system gives, from Sound.list__allowance"
+def grant__print(log):
+  "print the grants this system has issued, from Sound.list__grant"
   db = System.open_system_database(log)
   if db is None: return 1
-  list__row = Sound.list__allowance(db)
+  list__row = Sound.list__grant(db)
   if not list__row:
-    print("this system gives no login account sound")
+    print("no login account holds this system's grant of sound")
   for r in list__row:
-    print(f"{r['resource']:<8}{r['system_account__name']:<28}given {r['given']}")
+    print(f"{r['resource']:<8}{r['system_account__name']:<28}issued {r['issued']}")
   return 0
 
 def header(command ,dirp__storage ,preview):

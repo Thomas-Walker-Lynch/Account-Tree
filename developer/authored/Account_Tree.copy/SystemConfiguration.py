@@ -3,7 +3,8 @@
 SystemConfiguration - the systemd units and udev rules Account-Tree places
 
   configure(log ,preview)          write the units and the rules, then have
-                                   systemd and udev read them again
+                                   systemd and udev read them again; with them
+                                   the sound router's user unit
   rule__write(system_db ,log ,preview)
                                    write the rules from the registered storage
 
@@ -46,6 +47,8 @@ from StoragePlug import list__registration ,run ,run_logged ,program
 
 MARK = "# made by Account-Tree; Account-Tree_admin system configure replaces this file"
 DIRPA__UNIT = Path("/etc/systemd/system")
+DIRPA__USER_UNIT = Path("/etc/systemd/user")
+UNIT__ROUTER = "Account-Tree_router.service"
 FPA__RULE = Path("/etc/udev/rules.d/90-Account-Tree.rules")
 FPA__TRUE = "/usr/bin/true"
 
@@ -115,6 +118,57 @@ TimeoutStartSec=300
 ExecStart={admin} storage plug all
 """,
   }
+
+def fpa__router():
+  "the Account-Tree_router the user unit is to run: the one beside this module"
+  return Path(os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(__file__)) ,"Account-Tree_router")))
+
+def user_unit_text():
+  """
+  The user unit that runs the sound router under each account a person uses.
+  An account outside every account tree, or in a tree whose login account
+  holds no grant of sound, is answered no route, and its router waits until
+  told to reload.
+  """
+  return f"""{MARK}
+[Unit]
+Description=Account-Tree sound router
+ConditionUser=!@system
+Wants=pipewire.service
+After=pipewire.service wireplumber.service
+
+[Service]
+ExecStart={quoted(fpa__router())} run
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+
+def user_unit__write(log ,preview):
+  """
+  Write the router's user unit, and enable it for every account: the link in
+  default.target.wants that systemctl --global enable makes. A systemd user
+  instance running now reads it after systemctl --user daemon-reload; one
+  started later, at a login or an enter, reads it as it starts.
+  """
+  if not DIRPA__USER_UNIT.is_dir():
+    log.line("skipped" ,str(DIRPA__USER_UNIT) ,"no such directory, so no sound router is installed"); return False
+  if not file__write(DIRPA__USER_UNIT / UNIT__ROUTER ,user_unit_text() ,log ,preview): return False
+  link = DIRPA__USER_UNIT / "default.target.wants" / UNIT__ROUTER
+  target = DIRPA__USER_UNIT / UNIT__ROUTER
+  if link.is_symlink() and os.readlink(link) == str(target):
+    log.line("kept" ,str(link) ,"the router is enabled for every account"); return True
+  if link.exists() or link.is_symlink():
+    log.error(str(link) ,"exists and was not made by Account-Tree; it is left as it is"); return False
+  def make():
+    link.parent.mkdir(mode=0o755 ,exist_ok=True)
+    os.symlink(target ,link)
+  if not act(log ,preview ,str(link) ,make): return False
+  log.line("enabled" ,UNIT__ROUTER ,"for every account, from its next systemd user instance or daemon-reload")
+  return True
 
 def rule_text(system_db):
   line = [MARK ,"" ,
@@ -188,6 +242,7 @@ def configure(log ,preview):
     file__write(DIRPA__UNIT / name ,text ,log ,preview)
   if run_logged(log ,preview ,"systemd" ,["systemctl" ,"daemon-reload"]):
     log.line("reloaded" ,"systemd units")
+  user_unit__write(log ,preview)
   if not rule__write(system_db ,log ,preview): return
   # tag the keys plugged in now, so that systemd has their device units
   if program("udevadm") and run_logged(log ,preview ,"udev" ,["udevadm" ,"trigger" ,"--action=change" ,"--subsystem-match=hidraw"]):
