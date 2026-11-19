@@ -172,13 +172,39 @@ def row__storage_account(system_db ,system_account__name):
     raise RecordError(f"the storage database has no account of database uid {row['database_uid']}")
   return storage_db ,account
 
+def row__of(db ,statement ,parameter=()):
+  "the first row a statement reads from db, a Database.Database or a read-only sqlite3 connection; None when none"
+  return db.row(statement ,parameter) if hasattr(db ,"row") else db.execute(statement ,parameter).fetchone()
+
 def count_of__below(storage_db ,database_uid):
   "how many accounts are below the account database_uid in storage_db, those deallocated left out"
-  return storage_db.execute(
+  return row__of(storage_db,
     "WITH RECURSIVE below(database_uid) AS ("
     " SELECT database_uid FROM account WHERE parent__database_uid = ?"
     " UNION SELECT a.database_uid FROM account a JOIN below b ON a.parent__database_uid = b.database_uid)"
-    " SELECT COUNT(*) AS n FROM account WHERE database_uid IN below AND state != 'deallocated'" ,(database_uid,)).fetchone()["n"]
+    " SELECT COUNT(*) AS n FROM account WHERE database_uid IN below AND state != 'deallocated'" ,(database_uid,))["n"]
+
+def limit__problem(system_db ,storage_db ,account):
+  """
+  The problems with making one more account below the storage account
+  account: for it and each account above it, that the count below it would
+  pass its limit. The guard asks this, and the interpreter asks it again
+  under StoragePlug.Lock, so two requests at one moment cannot both take the
+  last place. Either database is a Database.Database or a read-only sqlite3
+  connection.
+  """
+  list__problem = []
+  each = account
+  for _ in range(DEPTH_MAX):
+    maximum = limit__of(system_db ,each["name"])
+    count = count_of__below(storage_db ,each["database_uid"])
+    if count + 1 > maximum:
+      list__problem.append(f"{each['name']} has {count} accounts below it, and its limit is {maximum};"
+                           " the administrator sets another with limit set")
+    if each["parent__database_uid"] is None: break
+    each = row__of(storage_db ,"SELECT * FROM account WHERE database_uid = ?" ,(each["parent__database_uid"],))
+    if each is None: break
+  return list__problem
 
 def below__not_in(system_db ,system_account__name ,list__state):
   "the names of the accounts directly below a system account in use, in its storage database, whose state is not in list__state"
@@ -218,16 +244,7 @@ def child_account__make__problem(system_db ,account__asking ,name):
     if storage_db.execute("SELECT 1 FROM account WHERE name = ?" ,(name,)).fetchone():
       list__problem.append(f"{name} is in the storage database already")
     # room under the limit of the parent and of each account above it
-    each = account
-    for _ in range(DEPTH_MAX):
-      maximum = limit__of(system_db ,each["name"])
-      count = count_of__below(storage_db ,each["database_uid"])
-      if count + 1 > maximum:
-        list__problem.append(f"{each['name']} has {count} accounts below it, and its limit is {maximum};"
-                             " the administrator sets another with limit set")
-      if each["parent__database_uid"] is None: break
-      each = storage_db.execute("SELECT * FROM account WHERE database_uid = ?" ,(each["parent__database_uid"],)).fetchone()
-      if each is None: break
+    list__problem += limit__problem(system_db ,storage_db ,account)
     return list__problem
   finally:
     storage_db.close()

@@ -33,12 +33,9 @@ import Database
 import Storage
 import SameAccount
 import StoragePlug
-import SystemAccount as sa
 import Request·Record as record
-from Common import SEPARATOR ,act ,valid_name ,dirpa__Account_Tree
+from Common import SEPARATOR ,DIRN__DEALLOCATED ,act ,valid_name ,dirpa__Account_Tree
 from System import open_system_database
-
-DIRN__DEALLOCATED = "account-deallocated"
 
 
 # --------------------------------------------------------------------------------
@@ -90,11 +87,12 @@ def list__child(storage_db ,account ,list__state):
 # --------------------------------------------------------------------------------
 # make
 
-def child__make(parent ,short_name ,list__group ,log ,preview):
+def child__make(parent ,short_name ,log ,preview):
   """
   Make the child account <parent>·<short_name> of the system account parent,
-  on parent's storage, a member of each group in list__group. Returns
-  {"name" ,"database_uid" ,"system_uid"}, or None when it stopped.
+  on parent's storage. Returns {"name" ,"database_uid" ,"system_uid"}, or
+  None when it stopped. The limits are counted again here, under the lock,
+  as the guard's count was made before it.
   """
   if SEPARATOR in short_name:
     log.error(short_name ,f"a short name holds no '{SEPARATOR}'"); return None
@@ -111,24 +109,21 @@ def child__make(parent ,short_name ,list__group ,log ,preview):
                 " a child account is made only for an account whose two names are the same"); return None
     if account__parent["state"] != "active":
       log.error(parent ,f"is {account__parent['state']}"); return None
-    for group in list__group:
-      if sa.system_group(group) is None:
-        log.error(group ,"no such system group"); return None
+    list__problem = record.limit__problem(system_db ,storage_db ,account__parent)
+    if list__problem:
+      for problem in list__problem: log.error(name ,problem)
+      return None
 
     count_of__error = log.count_of__error
     Storage.account__make(dirpa__root ,name ,None ,parent ,True ,log ,preview)
     if log.count_of__error > count_of__error: return None
     if preview:
-      if list__group: log.line("added" ,name ,"to the groups " + ", ".join(list__group))
       log.line("mounted" ,f"/home/{name}" ,"idmapped, once made")
       return {"name": name ,"database_uid": 0 ,"system_uid": 0}
 
     row = system_db.row("SELECT * FROM system_map WHERE system_account__name = ? AND state = 'in use'" ,(name,))
     if row is None:
       log.error(name ,"the system map does not record it, though it was made"); return None
-    if list__group:
-      if not act(log ,preview ,name ,sa.system_account__group_add ,name ,list__group): return None
-      log.line("added" ,name ,"to the groups " + ", ".join(list__group))
     storage_db = Storage.open_storage_database(dirpa__root ,log)
     Storage.attach_account(dirpa__Account_Tree(dirpa__root) ,storage_db ,row ,log ,preview)
     if log.count_of__error > count_of__error: return None

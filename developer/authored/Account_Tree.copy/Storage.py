@@ -21,7 +21,7 @@ from pathlib import Path
 
 import Database
 import Kernel
-from Common import DIRPA__HOME ,SEPARATOR ,BRANCH_MARK ,act ,valid_name ,dirp__storage__problem ,dirpa__Account_Tree ,host_name
+from Common import DIRPA__HOME ,SEPARATOR ,BRANCH_MARK ,DIRN__DEALLOCATED ,act ,valid_name ,dirp__storage__problem ,dirpa__Account_Tree ,host_name
 from System import open_system_database ,DATABASE_UID__FLOOR
 import SameAccount
 
@@ -120,6 +120,7 @@ def storage__delete(dirp__storage ,delete_account_data ,forget_other_systems ,lo
     log.error(str(dirp__storage) ,problem); return
   dirp__Account_Tree = dirpa__Account_Tree(dirp__storage)
   dirp__account_data = Database.dirp__account_data(dirp__Account_Tree)
+  dirp__deallocated = dirp__Account_Tree / DIRN__DEALLOCATED
   filep__database = Database.fpa__storage_database(dirp__Account_Tree)
   if not filep__database.is_file():
     log.line("kept" ,str(dirp__Account_Tree) ,"no storage database here; nothing to delete"); return
@@ -146,7 +147,7 @@ def storage__delete(dirp__storage ,delete_account_data ,forget_other_systems ,lo
     if dirp__mount_point.startswith(str(dirp__Account_Tree) + "/"):
       problem.append(f"{dirp__mount_point} is a mount point inside {dirp__Account_Tree}")
   for entry in sorted(dirp__Account_Tree.iterdir()):
-    if entry.name != "account-data" and not entry.name.startswith("database.sqlite3"):
+    if entry.name not in ("account-data" ,DIRN__DEALLOCATED) and not entry.name.startswith("database.sqlite3"):
       problem.append(f"{entry} is not Account-Tree's")
   list__holding_file = []
   if dirp__account_data.is_dir():
@@ -155,8 +156,13 @@ def storage__delete(dirp__storage ,delete_account_data ,forget_other_systems ,lo
         problem.append(f"{entry} is not the home of a storage account of this database")
       elif entry.is_dir() and any(entry.iterdir()):
         list__holding_file.append(entry.name)
+  # the homes of deallocated accounts, kept for the administrator to look through
+  list__deallocated = sorted(entry.name for entry in dirp__deallocated.iterdir()) if dirp__deallocated.is_dir() else []
   if list__holding_file and not delete_account_data:
     problem.append("these homes hold files: " + ", ".join(list__holding_file) + "; give the keyword delete-account-data to delete them too")
+  if list__deallocated and not delete_account_data:
+    problem.append(f"{dirp__deallocated} holds the homes of deallocated accounts: " + ", ".join(list__deallocated)
+                   + "; give the keyword delete-account-data to delete them too")
   if problem:
     for p in problem: log.error(str(dirp__Account_Tree) ,p)
     log.line("kept" ,str(dirp__Account_Tree) ,"nothing was changed")
@@ -172,6 +178,10 @@ def storage__delete(dirp__storage ,delete_account_data ,forget_other_systems ,lo
     count_of__home = sum(1 for _ in dirp__account_data.iterdir())
     if not act(log ,preview ,str(dirp__account_data) ,shutil.rmtree ,dirp__account_data): return
     log.line("deleted" ,str(dirp__account_data) ,f"{count_of__home} home" + ("" if count_of__home == 1 else "s"))
+  if dirp__deallocated.is_dir():
+    count_of__home = len(list__deallocated)
+    if not act(log ,preview ,str(dirp__deallocated) ,shutil.rmtree ,dirp__deallocated): return
+    log.line("deleted" ,str(dirp__deallocated) ,f"{count_of__home} home" + ("" if count_of__home == 1 else "s") + " of deallocated accounts")
   short ,database_uuid = db.short() ,db.uuid()
   db.close()
   for entry in sorted(dirp__Account_Tree.iterdir()):
@@ -374,6 +384,7 @@ def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account
   elif dirp__home.exists() and dirp__home.stat().st_uid != database_uid:
     log.error(str(dirp__home) ,f"exists, owned by uid {dirp__home.stat().st_uid}, not database uid {database_uid}"); return
 
+  is__home_made = False
   stamp = Database.now()
   with db.transaction(f"make storage account {name}" ,preview) as t:
     t.execute("INSERT INTO database_uid(database_uid ,state) VALUES (? ,'in use')" ,(database_uid,))
@@ -387,6 +398,7 @@ def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account
     log.line("kept" ,str(dirp__home) ,"existing home, owned by its database uid")
   else:
     if not act(log ,preview ,str(dirp__home) ,os.mkdir ,dirp__home ,0o700): return
+    is__home_made = True
     if not act(log ,preview ,str(dirp__home) ,os.chown ,dirp__home ,database_uid ,database_uid): return
     if not act(log ,preview ,str(dirp__home) ,os.chmod ,dirp__home ,0o700): return
     log.line("made" ,str(dirp__home) ,f"owned by database uid {database_uid}, mode 0700")
@@ -400,7 +412,24 @@ def account__make(dirp__storage ,name ,database_uid ,parent ,make_system_account
       return
     system_db = open_system_database(log)
     if system_db is None: return
-    SameAccount.same_account__map(system_db ,db ,name ,name ,True ,log ,preview)
+    if not SameAccount.same_account__map(system_db ,db ,name ,name ,True ,log ,preview):
+      storage_account__undo(db ,name ,database_uid ,dirp__home if is__home_made else None ,log)
+
+def storage_account__undo(db ,name ,database_uid ,dirp__home ,log):
+  """
+  Take back a storage account whose system account could not be made, as
+  when useradd refuses its name, so the name is free to be tried again and
+  the database holds no account no system can reach. Its database uid is
+  retired, as a uid is given out once. dirp__home, when given, is the home
+  made for it, empty, and is removed.
+  """
+  with db.transaction(f"undo storage account {name}: its system account was not made") as t:
+    t.execute("DELETE FROM account WHERE database_uid = ?" ,(database_uid,))
+    t.execute("UPDATE database_uid SET state = 'retired' WHERE database_uid = ?" ,(database_uid,))
+  log.line("undone" ,f"storage account {name}" ,f"its system account was not made; database uid {database_uid} retired")
+  if dirp__home is not None:
+    if act(log ,False ,str(dirp__home) ,os.rmdir ,dirp__home):
+      log.line("deleted" ,str(dirp__home) ,"its empty home")
 
 
 # --------------------------------------------------------------------------------

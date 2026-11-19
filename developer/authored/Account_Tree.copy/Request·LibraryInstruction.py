@@ -47,11 +47,34 @@ import Sound
 import SystemAccount as sa
 
 SHELL__DEFAULT = "/bin/sh"
+FPA__ACCOUNT_TREE = os.path.join(os.path.dirname(os.path.realpath(__file__)) ,"Account-Tree")
 
 
 class RequestError(Exception):
   """A request cannot be carried out."""
 
+
+def shell__of(entry):
+  "the login shell of a system account, or SHELL__DEFAULT when it names none"
+  return entry.pw_shell if entry.pw_shell and os.path.isabs(entry.pw_shell) else SHELL__DEFAULT
+
+def session__environment(display):
+  """
+  (the session type, tty, x11 or wayland ,the systemd-run --setenv
+  arguments) for a session given display
+  """
+  if display["wayland_display"]:
+    session_type = "wayland"
+  elif display["display"]:
+    session_type = "x11"
+  else:
+    session_type = "tty"
+  list__setenv = [f"--setenv=XDG_SESSION_TYPE={session_type}"]
+  if display["display"]:
+    list__setenv.append(f"--setenv=DISPLAY={display['display']}")
+  if display["wayland_display"]:
+    list__setenv.append(f"--setenv=WAYLAND_DISPLAY={display['wayland_display']}")
+  return session_type ,list__setenv
 
 def run(log ,argument ,what ,**option):
   """
@@ -137,19 +160,10 @@ class LibraryInstruction:
     os.fchown(fd__slave ,child.pw_uid ,gid__tty)
     os.fchmod(fd__slave ,0o620)
 
-    shell = child.pw_shell if child.pw_shell and os.path.isabs(child.pw_shell) else SHELL__DEFAULT
+    shell = shell__of(child)
     unit = f"Account-Tree_enter-{child.pw_uid}-{secrets.token_hex(4)}"
-    if display["wayland_display"]:
-      session_type = "wayland"
-    elif display["display"]:
-      session_type = "x11"
-    else:
-      session_type = "tty"
-    list__setenv = [f"--setenv=TERM={terminal_type}" ,f"--setenv=XDG_SESSION_TYPE={session_type}"]
-    if display["display"]:
-      list__setenv.append(f"--setenv=DISPLAY={display['display']}")
-    if display["wayland_display"]:
-      list__setenv.append(f"--setenv=WAYLAND_DISPLAY={display['wayland_display']}")
+    session_type ,list__setenv = session__environment(display)
+    list__setenv.append(f"--setenv=TERM={terminal_type}")
     # The login shell is started by sh, which first gives the display to the
     # child account's user manager, so the programs it starts, such as those
     # D-Bus activates, find the display too.
@@ -172,10 +186,37 @@ class LibraryInstruction:
     self._list__fd__close.remove(fd__master)
     session.append({"pty": fd__master})
 
+  def window_open(self ,account_name ,display):
+    """
+    The window runs as a session of the child account, as enter's shell
+    does, with no terminal: the child's login shell, so the window finds the
+    programs and the Python a shell of the child's would, gives the display to
+    the child's user manager and runs Account-Tree window for the child. What
+    the window writes goes to the journal, under the unit's name.
+    """
+    child = sa.system_account(account_name)
+    if child is None:
+      raise RequestError(f"there is no system account {account_name}")
+    self.display__give(child ,display)
+    unit = f"Account-Tree_window-{child.pw_uid}-{secrets.token_hex(4)}"
+    _ ,list__setenv = session__environment(display)
+    command = [shell__of(child) ,"-l" ,"-c"
+               ,'systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_SESSION_TYPE 2>/dev/null; exec "$0" window .'
+               ,FPA__ACCOUNT_TREE]
+    run(self._log ,["systemd-run" ,"--quiet" ,"--collect" ,f"--unit={unit}" ,"--service-type=exec"
+                    ,f"--uid={child.pw_uid}" ,f"--gid={child.pw_gid}"
+                    ,"--property=PAMName=login"
+                    ,"--property=StandardInput=null" ,"--property=StandardOutput=journal" ,"--property=StandardError=journal"
+                    ,"--property=WorkingDirectory=~"
+                    ,*list__setenv ,"--" ,*command]
+        ,f"the window of {child.pw_name}")
+    self._log("opened" ,f"the window of {child.pw_name}, under {child.pw_name}, as the unit {unit}.service;"
+              f" what it writes is read with journalctl -u {unit}")
+
   def make_child_account(self ,account_name ,made):
     log = LogInterpreter(self._log)
     parent ,short_name = account_name.rsplit("·" ,1)
-    result = ChildAccount.child__make(parent ,short_name ,[] ,log ,False)
+    result = ChildAccount.child__make(parent ,short_name ,log ,False)
     if result is None:
       raise log.failure(f"making {account_name}")
     made.append(result)

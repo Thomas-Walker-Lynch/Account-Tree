@@ -24,7 +24,7 @@
     <RT·article>
       <RT·title
         author="Thomas Walker Lynch"
-        date="2026-11-18"
+        date="2026-11-19"
         title="Account-Tree 5.0 Audio Design">
       </RT·title>
 
@@ -102,7 +102,7 @@
       </ul>
 
       <p>
-        The login account holds every permit by default, so that it can issue them down the tree. Every other account starts with none. A permit is issued to an account and revoked by its parent, or by any account above it acting through the window, which acts with the authority of the account it was first opened under; the person at the login account's window also revokes and issues the login account's own. An account that holds a permit, in force or not, issues and revokes the same permit for the accounts below it, so putting a child on a bus end issues it a permit it too can issue down.
+        The login account holds every permit by default, so that it can issue them down the tree. Every other account starts with none. A permit is issued to an account and revoked by an account above it, never by the account itself: in the window, by its parent, on the parent's window, as every window acts with the authority of its own account; with the command, by any account above it. The login account also revokes and issues its own. An account that holds a permit, in force or not, issues and revokes the same permit for the accounts below it, so putting a child on a bus end issues it a permit it too can issue down.
       </p>
 
       <p>
@@ -332,13 +332,13 @@
       </p>
 
       <ul>
-        <li><em>Bus</em>: the tree's buses, numbered, with their names, and for each end the accounts holding a permit for it. Editable in the login account's window alone.</li>
-        <li><em>Permit</em>: a row for the window account and one for each of its child accounts; a column for each end of each bus and one for each device, holding the three-state marks. The window account's own marks change only from an account above it, except the login account's.</li>
-        <li><em>Connection</em>: the window account's connection table, as text, with Save and Reset to default. Lines without full permits are shown dimmed.</li>
+        <li><em>Bus</em>: the tree's buses, numbered, with their names, and for each end the accounts holding a permit for it; then the devices, with the accounts holding a permit for each. In the login account's window, each name is an entry, renaming the bus on Enter, each bus has a button removing it, and a last row makes a bus from a number and a name.</li>
+        <li><em>Permit</em>: a row for the window account and one for each of its child accounts; a column for each end of each bus and one for each device, holding the three-state marks as check boxes: empty, blank; a dash, gray; checked, full. Clicking a blank mark issues the permit, clicking another revokes it. A mark the window account cannot change is greyed out: in the login account's window every mark can change, its own row's included; in another account's window, its own row never changes, and its child accounts' marks change for the permits it holds, gray or full, as its own row shows.</li>
+        <li><em>Connection</em>: the window account's connection table, as text, with Save and Reset to default. A table that is refused stays as typed, and the Request panel says which line is wrong. An account with no table yet is told it is made with its first permit.</li>
       </ul>
 
       <p>
-        Opening a child account's window from this one gives the same panel one generation lower, acting with the authority of the account the first window was opened under.
+        Above the three parts the panel says whether the login account holds the grant, and, when it holds none, the command that issues one. Each change is a request, and the panel is read again after it, with <RT·code>sound_show</RT·code>; a Read again button reads it on demand. Opening a child account's window from this one gives the same panel one generation lower, running under the child account and acting with its authority.
       </p>
 
       <h1>Life cycle</h1>
@@ -356,8 +356,8 @@
 
       <ul>
         <li><em>Built</em>: the records, in the system database and the storage database; <RT·code>Sound.py</RT·code>, the permits and their marks, the connection tables, the buses, and making and deleting the FIFOs; the requests, with their checks in the request guard; the <RT·code>Account-Tree sound</RT·code> and <RT·code>Account-Tree_admin sound</RT·code> commands; the FIFOs made again at attach, and deleted at unplug and deallocation.</li>
-        <li><em>Built</em>: the router, <RT·code>Account-Tree_router</RT·code> and <RT·code>Sound·Router.py</RT·code>, and its user unit. Tested on a machine running PipeWire 1.0.5 and WirePlumber 0.4 under two accounts, each with its own session bus and no systemd, with null nodes standing in for the speaker and the microphone: a child's program played through system sound to the stand-in speaker, two children played there at once, the stand-in microphone was heard by a child's program through system microphone, a program no line matched went to the bit bucket, and revoking a permit, revoking the grant and issuing it again took effect at the routers' reload. Not yet run on IdealX.</li>
-        <li><em>Not yet built</em>: the window's Sound panel, which waits for the window to move onto <RT·code>Request·Composer</RT·code>.</li>
+        <li><em>Built</em>: the router, <RT·code>Account-Tree_router</RT·code> and <RT·code>Sound·Router.py</RT·code>, and its user unit. Tested on a machine running PipeWire 1.0.5 and WirePlumber 0.4 under two accounts, each with its own session bus and no systemd, with null nodes standing in for the speaker and the microphone: a child's program played through system sound to the stand-in speaker, two children played there at once, the stand-in microphone was heard by a child's program through system microphone, a program no line matched went to the bit bucket, and revoking a permit, revoking the grant and issuing it again took effect at the routers' reload. Run on IdealX: the hub's router, and a child account playing through system sound to the speakers.</li>
+        <li><em>Built</em>: the window's Sound panel. Tried on the test machine under X: issuing and revoking permits from the login account's window and from a child account's, the gray mark with the grant revoked, making a bus, and a refused connection table.</li>
       </ul>
 
       <h1>To verify</h1>
@@ -377,7 +377,7 @@
       </ol>
 
       <p>
-        Still to try on IdealX, PipeWire 1.2 or later and WirePlumber 0.5: the user unit starting the router at login and at <RT·code>enter</RT·code>; the routers reloading when told; real devices, and the loopbacks following a change of output in GNOME's sound settings; <RT·code>pw-metadata</RT·code> targets under WirePlumber 0.5; the program name Firefox and Chrome give as <RT·code>application.process.binary</RT·code>, which the default line for the microphone matches in full; and a video's lip sync.
+        Tried on IdealX: the user unit starting the router; a child account's program heard on the speakers. Still to try there, PipeWire 1.2 or later and WirePlumber 0.5: the routers reloading when a permit or a table changes, and at <RT·code>enter</RT·code>; the loopbacks following a change of output in GNOME's sound settings, now that the router leaves WirePlumber's links alone; <RT·code>pw-metadata</RT·code> targets under WirePlumber 0.5; the program name Firefox and Chrome give as <RT·code>application.process.binary</RT·code>, which the default line for the microphone matches in full; and a video's lip sync.
       </p>
 
       <h1>Later feature</h1>

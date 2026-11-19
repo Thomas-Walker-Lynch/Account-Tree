@@ -3,13 +3,14 @@
 ResourceKind - the kinds of resource an account can be allocated
 
 Each resource kind is listed once here. The window builds its Allocate
-panel from this list, so a kind that is listed but has no allocator yet
-appears greyed out. Writing an allocator for a kind is the step that turns
-its button on: set allocator to the function that opens its window.
+panel from this list, so a kind that is listed but has no action yet
+appears greyed out. Writing the window's part for a kind is the step that
+turns its button on: set action to the name of the resource window's method
+that does it, as Window.py names them.
 """
 
 from dataclasses import dataclass
-from typing import Callable ,Optional
+from typing import Optional
 
 
 @dataclass
@@ -17,11 +18,11 @@ class ResourceKind:
   name: str
   group: str
   description: str
-  allocator: Optional[Callable] = None
+  action: Optional[str] = None
 
   @property
   def implemented(self) -> bool:
-    return self.allocator is not None
+    return self.action is not None
 
 
 # Groups in the order the window shows them.
@@ -37,14 +38,13 @@ GROUP_TITLE = {
 
 LIST__KIND = [
   ResourceKind("child account" ,"account",
-    "a new account below this one; it opens its own resource window"),
+    "a new account below this one; it opens its own resource window",
+    "child_account__make"),
   ResourceKind("capture account" ,"account",
-    "take an existing system account as a child account of this one; the authority decides whether this is allowed"),
+    "take an existing system account as a child account of this one; the request guard decides whether it is allowed"),
 
   ResourceKind("home directory" ,"storage",
     "the account's own home, kept on a storage and mounted at /home/<account>"),
-  ResourceKind("view" ,"storage",
-    "an idmapped mount that shows a child account's files as owned by this account"),
   ResourceKind("storage" ,"storage",
     "a persistent storage device, removable or encrypted, this account may open and attach"),
 
@@ -57,8 +57,9 @@ LIST__KIND = [
 
   ResourceKind("display" ,"device",
     "permission to open windows on the parent account's display"),
-  ResourceKind("sound card" ,"device",
-    "the lease on the sound card; one account holds it at a time (the old subu_sound script does this today)"),
+  ResourceKind("sound" ,"device",
+    "permits for the ends of the tree's buses and for the devices, and the connection table; in the Sound panel",
+    "sound__focus"),
   ResourceKind("graphics chip" ,"device",
     "use of the GPU, or of a virtual slice of it"),
   ResourceKind("USB device" ,"device",

@@ -24,11 +24,22 @@ SEPARATOR = "·"
 # <name><BRANCH_MARK><eight hex digits>
 BRANCH_MARK = "~"
 DIRN__ACCOUNT_TREE = "Account-Tree"
+# in the Account-Tree directory of a storage, beside account-data/: the homes of
+# deallocated accounts, kept for the administrator to look through
+DIRN__DEALLOCATED = "account-deallocated"
 # Where Account-Tree keeps its files on a storage, below the storage's root. This
 # is the one place the layout is written; everything else asks
 # dirpa__Account_Tree for it.
 DIRR__ACCOUNT_TREE = Path("home") / DIRN__ACCOUNT_TREE
 RESERVED_NAME = {DIRN__ACCOUNT_TREE}
+# The longest account name, in bytes of UTF-8. A name is a directory name, of
+# its home and its mount point, at most NAME_MAX, 255 bytes, and a deallocated
+# home is kept as <name>.<YYYYmmddTHHMMSSZ>, 17 bytes longer: 255 - 17. A
+# longer name is refused, never shortened, as a shortened name could be
+# another account's. useradd --badname accepts names of this length; systems
+# still keeping utmp login records cut names there to 32 bytes, which
+# Account-Tree does not read.
+NAME__BYTE_MAX = 255 - len(".YYYYmmddTHHMMSSZ")
 
 
 class Log:
@@ -99,12 +110,14 @@ def valid_name(name):
   """
   Why name cannot be an account name, or None when it can.
   """
-  if not name or len(name.encode("utf-8")) > 32:
-    return "an account name is 1 to 32 bytes"
+  if not name or len(name.encode("utf-8")) > NAME__BYTE_MAX:
+    return f"an account name is 1 to {NAME__BYTE_MAX} bytes"
   if any(c in name for c in "/: \t\n") or name.startswith(("-" ,SEPARATOR)) or name.endswith(SEPARATOR):
     return "an account name may not contain '/', ':' or spaces, nor start with '-' or begin or end with '·'"
   if SEPARATOR * 2 in name:
     return "an account name may not contain an empty part between two '·'"
+  if any(part in ("." ,"..") for part in name.split(SEPARATOR)):
+    return "no part of an account name is '.' or '..', which name the current account and its parent"
   if name in RESERVED_NAME:
     return f"'{name}' is reserved: /home/{name} holds Account-Tree's own files"
   return None

@@ -16,7 +16,7 @@ the definition in Request·Language.py. They are LIST__CHECK:
                and the storage databases: the asking account is an account
                a person uses, kept by Account-Tree; and for each request:
                  enter                the account is below it, active, and
-                                      has its home mounted
+                 window_open          has its home mounted
                  make_child_account   the parent is the asking account or
                                       below it, and active; the name is free;
                                       the limits of the parent and of each
@@ -119,6 +119,14 @@ def check_language(list__instruction_view ,data ,constraint ,gate_invoking_accou
     list__problem += [f"@{view.index} enter: {p}" for p in display__problem(display)]
     if not PATTERN__TERMINAL_TYPE.fullmatch(terminal_type):
       list__problem.append(f"@{view.index} enter: terminal type {clean(repr(terminal_type))} is not a terminal type name")
+  elif view.operation == "window_open":
+    account_name ,display = literal(view)
+    problem = valid_name(account_name)
+    if problem:
+      list__problem.append(f"@{view.index} window_open: account {clean(repr(account_name))}: {problem}")
+    list__problem += [f"@{view.index} window_open: {p}" for p in display__problem(display)]
+    if not display["display"] and not display["wayland_display"]:
+      list__problem.append(f"@{view.index} window_open: no display is given, so there is nothing to open the window on")
   elif view.operation == "make_child_account":
     account_name ,_ = literal(view)
     problem = valid_name(account_name) or (None if SEPARATOR in account_name else
@@ -189,7 +197,7 @@ def check_record(list__instruction_view ,data ,constraint ,gate_invoking_account
     for view in list__instruction_view:
       at = f"@{view.index} {view.operation}: "
       value = literal(view)
-      if view.operation == "enter":
+      if view.operation in ("enter" ,"window_open"):
         list__problem += [at + p for p in record.account__below(system_db ,gate_invoking_account ,value[0])]
       elif view.operation == "make_child_account":
         list__problem += [at + p for p in record.child_account__make__problem(system_db ,gate_invoking_account ,value[0])]
@@ -307,7 +315,7 @@ def display_file__problem(system_db ,fpa__checked ,what ,asking ,is__kind ,kind 
 
 def check_filesystem(list__instruction_view ,data ,constraint ,gate_invoking_account):
   asking = pwd.getpwnam(gate_invoking_account)
-  list__view = [view for view in list__instruction_view if view.operation == "enter"]
+  list__view = [view for view in list__instruction_view if view.operation in ("enter" ,"window_open")]
   if not list__view:
     return []
   try:
@@ -317,7 +325,7 @@ def check_filesystem(list__instruction_view ,data ,constraint ,gate_invoking_acc
   try:
     list__problem = []
     for view in list__view:
-      at = f"@{view.index} enter: "
+      at = f"@{view.index} {view.operation}: "
       display = literal(view)[1]
       if display["wayland_display"]:
         problem ,owner = display_file__problem(system_db ,display["wayland_display"] ,"Wayland socket" ,asking

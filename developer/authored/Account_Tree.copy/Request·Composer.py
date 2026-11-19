@@ -157,6 +157,15 @@ def enter(account_name ,display=None ,terminal_type=None):
                        ,terminal_type or os.environ.get("TERM") or "dumb"] ,"session")
   return value["pty"]
 
+def window_open(account_name ,display=None):
+  """
+  Ask to open the window of account_name, an account below this program's
+  account, running under account_name, on this program's display. Returns
+  output. Raises RequestError.
+  """
+  return request(f"the request to open the window of {account_name}" ,"window_open"
+                 ,[account_name ,display if display is not None else display__here()])[1]
+
 def make_child_account(account_name):
   """
   Ask to make the account account_name, an absolute name whose parent is

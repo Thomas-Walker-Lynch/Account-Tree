@@ -17,13 +17,15 @@ the account tree's records whether this account can have it done.
 
 Usage: Account-Tree <command> [argument ...]
   help | -h | --help   print this message (also printed when given no arguments)
-  window <account>     open the resource window for <account>
+  window <account>     open the resource window of <account>, this account,
+                       ., or one below it. The window runs under <account>
+                       and acts with its authority: for an account below this
+                       one it is started as a session of that account, on your
+                       display, as enter starts a shell
   list <account>       print the child accounts of <account>
-  resource             print the kinds of resource, and which have an allocator
+  resource             print the kinds of resource, and which the window can allocate
   current              print the current account, the one this program runs
-                       under, absolutely, as ·Thomas·developer; a script opens
-                       the window for it with
-                         Account-Tree window "$(Account-Tree current)"
+                       under, absolutely, as ·Thomas·developer
   enter <account>      start a login shell of <account>, an account below this
                        one, in this terminal; the shell, and every program started
                        from it, runs under <account>, and can open windows on
@@ -91,10 +93,13 @@ runs under, or, with a leading '·', absolutely, from root. Run under Thomas:
   ·Thomas                   Thomas
   ·Thomas·developer         Thomas·developer
   ·                         root
+  .                         Thomas, the current account
+  ..                        root, its parent
 
 Run under Thomas·developer, as in a shell entered with enter developer, build
-is Thomas·developer·build. No account name begins with '·', so each name has
-one reading. A name ending in '·' is refused. A command that takes an account
+is Thomas·developer·build, . is Thomas·developer, .. is Thomas, and ..·browser
+is Thomas·browser. The parts are read in turn, as in a path. No account name
+begins with '·', and no part of one is . or .., so each name has one reading. A name ending in '·' is refused. A command that takes an account
 requires it: none has a default, so no word is taken for an account it was not.
 The commands that change the tree, through the request gate, can name any
 account; the gate decides from the records which this account can change.
@@ -135,17 +140,47 @@ def account_argument(rest ,command):
   return entry
 
 def command__window(rest):
+  """
+  The window of the current account is drawn here. The window of an account
+  below it is asked of the request gate, which starts it under that account;
+  this program does not draw a window with another account's name and its
+  own authority.
+  """
   entry = account_argument(rest ,"window")
   if entry is None: return 1
-  import Window
-  return Window.run(entry ,AccountTree.acting_account())
+  acting = AccountTree.acting_account()
+  if not (entry.name == acting.name or acting.name == "root" or entry.name.startswith(acting.name + AccountTree.SEPARATOR)):
+    print(f"Error: {entry.name} is not this account or below it. A window runs under its own account and acts with its"
+          f" authority, so the window of {entry.name} is opened from a shell of {entry.name}, or from the window of an"
+          " account above it." ,file=sys.stderr)
+    return 1
+  if entry.name == acting.name:
+    import Window
+    return Window.run(entry)
+  import Request·Composer as composer
+  try:
+    output = composer.window_open(entry.name)
+  except composer.RequestError as error:
+    return request_error(error)
+  for line in composer.list__done(output):
+    print(line)
+  return 0
 
 def command__list(rest):
   entry = account_argument(rest ,"list")
   if entry is None: return 1
-  for child in AccountTree.list__child_account(entry.name):
-    print(f"{child.name:<28}{child.uid:>7}  {child.home}")
+  child_account__print(AccountTree.list__child_account(entry.name))
   return 0
+
+def child_account__print(list__child):
+  "print a list of AccountTree.list__child_account: one line each, its name, system uid and home"
+  for child in list__child:
+    print(f"{child.name:<28}{child.uid:>7}  {child.home}")
+
+def member__print(list__member):
+  "print a list of Share.list__member: one account name a line"
+  for member in list__member:
+    print(member)
 
 def command__current(rest):
   if rest:
@@ -161,8 +196,8 @@ def command__resource(rest):
   for group ,list__kind in ResourceKind.list__kind__by_group():
     print(ResourceKind.GROUP_TITLE[group])
     for kind in list__kind:
-      state = "allocator" if kind.implemented else "not written"
-      print(f"  {kind.name:<20}{state:<13}{kind.description}")
+      state = "in the window" if kind.implemented else "not written"
+      print(f"  {kind.name:<20}{state:<15}{kind.description}")
   return 0
 
 def command__enter(rest):
@@ -265,10 +300,8 @@ def command__share(rest):
   if word == "list":
     if list__text:
       print("Error: share <account> list is given nothing after list." ,file=sys.stderr); return 1
-    import SystemAccount
-    group = SystemAccount.system_group(name)
-    for member in sorted(group.gr_mem if group else []):
-      print(member)
+    import Share
+    member__print(Share.list__member(name))
     return 0
   if not list__text:
     print(f"Error: share {rest[0]} {word} is given the accounts to share with." ,file=sys.stderr); return 1

@@ -4,8 +4,8 @@
 Account-Tree_admin
 
 The administrator's program. It runs under root, and calls the work functions
-directly, so it works whether or not the Account-Tree server is running. A
-person manages the child accounts of his own login account with the
+directly; a person's requests go through the request gate instead. A person
+manages the child accounts of his own login account with the
 Account-Tree program.
 
 Account-Tree keeps light containers made of Linux accounts. The accounts form
@@ -163,8 +163,9 @@ Commands:
                                  console, and unmount their homes. Delete the system
                                  accounts Account-Tree made for them, with the files
                                  they left in /tmp, /var/tmp and /dev/shm, freeing their
-                                 system uids; their passwords, shells and groups are
-                                 kept in the system database for the next plug. Hide
+                                 system uids; their passwords, password aging,
+                                 comments and shells are kept on the storage, in
+                                 its database, for the next plug. Hide
                                  adopted ones from the login screen. Unmount and lock
                                  the storage, and power the drive off: once its light
                                  is out it is safe to pull
@@ -340,8 +341,10 @@ def CLI(argv=None):
       (dirp__storage ,name) ,keyword = split_keyword(rest ,2 ,("make-system-account",) ,("uid" ,"parent" ,"from"))
       database_uid = integer(keyword["uid"] ,"uid") if "uid" in keyword else None
       header(command ,dirp__storage ,preview)
-      Storage.account__make(dirp__storage ,name ,database_uid ,keyword.get("parent") ,"make-system-account" in keyword ,log ,preview,
-                            keyword.get("from"))
+      # under the lock the requests take, so a request cannot choose the same uid beside it
+      with StoragePlug.Lock():
+        Storage.account__make(dirp__storage ,name ,database_uid ,keyword.get("parent") ,"make-system-account" in keyword ,log ,preview,
+                              keyword.get("from"))
     elif command == "account deallocate" and len(rest) == 1:
       header(command ,None ,preview)
       ChildAccount.child__deallocate(rest[0] ,log ,preview)
@@ -352,7 +355,8 @@ def CLI(argv=None):
       specifier ,keyword = split_keyword(rest ,6 ,("make-system-account",))
       system_spec ,storage_spec = system_and_storage(list__account_specifier(specifier))
       header(command ,None ,preview)
-      SameAccount.is__same_account(system_spec ,storage_spec ,"make-system-account" in keyword ,log ,preview)
+      with StoragePlug.Lock():
+        SameAccount.is__same_account(system_spec ,storage_spec ,"make-system-account" in keyword ,log ,preview)
     elif command == "is-not-same-account" and rest:
       specifier ,_ = split_keyword(rest ,6)
       system_spec ,storage_spec = system_and_storage(list__account_specifier(specifier))

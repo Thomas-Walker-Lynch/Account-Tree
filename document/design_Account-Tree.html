@@ -24,7 +24,7 @@
     <RT·article>
       <RT·title
         author="Thomas Walker Lynch"
-        date="2026-11-18"
+        date="2026-11-19"
         title="Account-Tree 5.0 Design">
       </RT·title>
 
@@ -120,12 +120,47 @@
       <h2>Account name</h2>
 
       <p>
-        The middle dot (U+00B7, written <RT·code>·</RT·code>) is not permitted in a short name, so a full name divides in exactly one way, and the conventional characters <RT·code>_</RT·code>, <RT·code>-</RT·code> and <RT·code>.</RT·code> remain free for use in names. It lies outside the POSIX portable character set. Making an account needs the <RT·code>--badname</RT·code> flag of <RT·code>useradd</RT·code>, and a tool that checks account names against the portable set needs its check widened. In UTF-8 the middle dot is two bytes, and an account name is currently limited to 32 bytes. That limit is set in user space, by the fixed name field of the <RT·code>utmp</RT·code> login records and by <RT·code>useradd</RT·code>, not by the kernel, which knows accounts only by uid. pkg-config prints paths holding the middle dot in a form that is not valid UTF-8; builds that pass such paths through pkg-config need the workaround given in <RT·code>shared/project-dependency/Python.org</RT·code>.
+        The middle dot (U+00B7, written <RT·code>·</RT·code>) is not permitted in a short name, so a full name divides in exactly one way, and the conventional characters <RT·code>_</RT·code>, <RT·code>-</RT·code> and <RT·code>.</RT·code> remain free for use in names. It lies outside the POSIX portable character set. Making an account needs the <RT·code>--badname</RT·code> flag of <RT·code>useradd</RT·code>, and a tool that checks account names against the portable set needs its check widened. In UTF-8 the middle dot is two bytes; an account name is limited to 238 bytes, as Name length explains. pkg-config prints paths holding the middle dot in a form that is not valid UTF-8; builds that pass such paths through pkg-config need the workaround given in <RT·code>shared/project-dependency/Python.org</RT·code>.
       </p>
 
       <p>
         The name <RT·code>Account-Tree</RT·code> is reserved, because on a running system <RT·code>/home/Account-Tree</RT·code> holds Account-Tree's own files. A system account made for a branch of a storage database is named with a tilde and eight hex digits, as <RT·code>Thomas·try~a7b3247f</RT·code>, described under Copies. That is a default, not a rule on names: the system map, not the name, records which system accounts belong to a branch.
       </p>
+
+      <p>
+        No part of a name is <RT·code>.</RT·code> or <RT·code>..</RT·code>, which name the current account and its parent when a name is typed. <RT·code>Common.valid_name</RT·code> refuses them. An account named <RT·code>..</RT·code> would have <RT·code>/home/..</RT·code>, which is <RT·code>/</RT·code>, for its home.
+      </p>
+
+      <h2>Character rule</h2>
+
+      <p>
+        What each layer of a Linux system allows in an account name:
+      </p>
+
+      <table>
+        <tr><th>Layer</th><th>Allowed</th><th>Refused</th></tr>
+        <tr><td>kernel</td><td>no names, only uids</td><td></td></tr>
+        <tr><td><RT·code>/etc/passwd</RT·code> and the C library</td><td>any bytes</td><td>NUL, the C string's end; <RT·code>:</RT·code>, the field separator; newline, the record separator</td></tr>
+        <tr><td>NSS modules (sssd, winbindd)</td><td>UTF-8, spaces, <RT·code>@</RT·code>, <RT·code>\</RT·code></td><td>NUL, <RT·code>:</RT·code>, newline</td></tr>
+        <tr><td>systemd, relaxed mode</td><td>UTF-8, inner spaces, punctuation; no length limit</td><td>control characters, <RT·code>:</RT·code>, <RT·code>/</RT·code>, the empty name, <RT·code>.</RT·code> and <RT·code>..</RT·code>, a name of digits only or of <RT·code>-</RT·code> and digits, leading or trailing white space</td></tr>
+        <tr><td>POSIX</td><td><RT·code>A-Z a-z 0-9 . _ -</RT·code></td><td>a leading <RT·code>-</RT·code></td></tr>
+        <tr><td>systemd, strict mode</td><td><RT·code>A-Z a-z 0-9 _ -</RT·code></td><td>a leading digit or <RT·code>-</RT·code>; more than 31 bytes</td></tr>
+        <tr><td><RT·code>useradd</RT·code>, by default</td><td><RT·code>a-z 0-9 _ -</RT·code>, and a trailing <RT·code>$</RT·code> for Samba machine accounts</td><td>upper case, <RT·code>.</RT·code>, a leading digit or <RT·code>-</RT·code></td></tr>
+      </table>
+
+      <p>
+        A leading <RT·code>-</RT·code> is refused because a command would read the name as an option: <RT·code>chown -r file</RT·code> takes <RT·code>-r</RT·code> for a flag, not a user. A <RT·code>.</RT·code> inside a name is legal but awkward, as the old <RT·code>chown user.group</RT·code> syntax splits on it. systemd uses strict mode for the accounts its own components make, through sysusers and homed, and relaxed mode for accounts made by other programs, which it meets in logind and in the <RT·code>User=</RT·code> setting of a unit. Account-Tree's names, with the middle dot, pass the relaxed mode and fail the others, so Account-Tree makes its accounts with <RT·code>useradd --badname</RT·code>, and systemd meets them in relaxed mode only.
+      </p>
+
+      <h2>Name length</h2>
+
+      <p>
+        An account name is at most 238 bytes, <RT·code>Common.NAME__BYTE_MAX</RT·code>. A name is a directory name, of the home on the storage and of the mount point in <RT·code>/home</RT·code>, so it is at most <RT·code>NAME_MAX</RT·code>, 255 bytes; a deallocated home is kept as <RT·code>&lt;name&gt;.&lt;YYYYmmddTHHMMSSZ&gt;</RT·code>, 17 bytes longer, which leaves 238. A longer name is refused, never shortened: <RT·code>Common.valid_name</RT·code> refuses it in the guard's language check and again when the account is made. A shortened name could be the name of another account, an ancestor's among them, so cutting is the danger to guard against.
+      </p>
+
+      <p>
+        The system has its own limits. The kernel knows only uids, and systemd sets no limit on the accounts it meets in relaxed mode. The <RT·code>utmp</RT·code> login records have a 32-byte name field and cut a longer name; Account-Tree does not read them, and openSUSE keeps its login records with <RT·code>wtmpdb</RT·code> and <RT·code>lastlog2</RT·code> instead, which have no fixed field. <RT·code>useradd</RT·code> refuses a name it will not take rather than cut it: on IdealX, openSUSE's <RT·code>useradd --badname</RT·code> took a name of 106 bytes, while the shadow suite 4.13 of the test system refuses a name past 32 bytes. When <RT·code>useradd</RT·code> refuses, the storage account made a moment before is taken back, <RT·code>Storage.storage_account__undo</RT·code>: its row is deleted, its database uid retired, and its empty home removed, so the name can be tried again and no account is left that no system can reach.
+</p>
 
       <h2>Name relative to the current account</h2>
 
@@ -140,10 +175,16 @@
         ·Thomas                Thomas
         ·Thomas·developer      Thomas·developer
         ·                      root
+        .                      Thomas, the current account
+        ..                     root, its parent
       </RT·code>
 
       <p>
-        Relative names follow the current account through <RT·code>enter</RT·code>: in a session of <RT·code>Thomas·developer</RT·code>, <RT·code>build</RT·code> names <RT·code>Thomas·developer·build</RT·code>. <RT·code>AccountTree.account_name__expand</RT·code> makes the expansion and <RT·code>AccountTree.account_name__specifier</RT·code> writes a full name back in absolute form. <RT·code>Account-Tree current</RT·code> prints the current account absolutely, so a script started in a session learns where it is, as in <RT·code>Account-Tree window "$(Account-Tree current)"</RT·code>. The request gate is given full names: the person's program expands a name before it composes a journal, against its current account, which is the gate invoking account.
+        The parts of a name are read in turn, as the parts of a path are: <RT·code>.</RT·code> stays and <RT·code>..</RT·code> goes up one. Run under <RT·code>Thomas·developer</RT·code>, <RT·code>..</RT·code> is <RT·code>Thomas</RT·code> and <RT·code>..·browser</RT·code> is <RT·code>Thomas·browser</RT·code>, a sibling. A command that takes an account requires one, so the current account is named <RT·code>.</RT·code>, as in <RT·code>Account-Tree window .</RT·code>. Bash leaves <RT·code>.</RT·code> and <RT·code>..</RT·code> as they are; it would rewrite a <RT·code>~</RT·code>, which in any case marks a branch's system account.
+      </p>
+
+      <p>
+        Relative names follow the current account through <RT·code>enter</RT·code>: in a session of <RT·code>Thomas·developer</RT·code>, <RT·code>build</RT·code> names <RT·code>Thomas·developer·build</RT·code>. <RT·code>AccountTree.account_name__expand</RT·code> makes the expansion and <RT·code>AccountTree.account_name__specifier</RT·code> writes a full name back in absolute form. <RT·code>Account-Tree current</RT·code> prints the current account absolutely, so a script started in a session learns where it is. The request gate is given full names: the person's program expands a name before it composes a journal, against its current account, which is the gate invoking account.
       </p>
 
       <h2>Identity of an account</h2>
@@ -507,11 +548,12 @@
       </p>
 
       <p>
-        Each request acts on the requesting account or on an account in the tree below it, with the authority of the requesting account; this is how a child account's window, opened from its parent's, acts with the parent's authority. Each has a result, which the person's program shows. The definition is <RT·code>Request·Language.py</RT·code>.
+        Each request acts on the requesting account or on an account in the tree below it, with the authority of the requesting account. Each has a result, which the person's program shows. The definition is <RT·code>Request·Language.py</RT·code>.
       </p>
 
       <ul>
         <li><RT·code>enter</RT·code>(account_name, display, terminal_type, &gt;session): start a login session of an account below the requesting account, on a new terminal. display names the requesting account's display: <RT·code>DISPLAY</RT·code>, the Wayland socket's absolute path and the X authority file's absolute path, each empty where there is none. terminal_type is the <RT·code>TERM</RT·code> the session is given. Result: session, holding the terminal's master side, a descriptor. Described under Login and entering.</li>
+        <li><RT·code>window_open</RT·code>(account_name, display): start the resource window of an account below the requesting account, running under it, as a session of it with no terminal, on the requesting account's display, which is given as <RT·code>enter</RT·code> gives it. The session runs the account's login shell, so the window finds the programs and the Python a shell of the account would, and the shell runs <RT·code>Account-Tree window .</RT·code>. What the window writes goes to the journal under the unit's name, which the result reports.</li>
         <li><RT·code>make_child_account</RT·code>(account_name, &gt;made): make account_name, whose parent, the name before its last middle dot, is the requesting account or an account below it, active, and not the system account of a branch, on the parent's storage. Steps: a database uid, never given before, and the account row in the storage database; a system uid, never given before, and the row in the system map; the system account; the home in <RT·code>account-data</RT·code>, owned by the database uid, mode 0700; the mount of it at <RT·code>/home/&lt;name&gt;</RT·code>. Result: made, the account's name, database uid and system uid.</li>
         <li><RT·code>deallocate</RT·code>(account_name): remove an account below the requesting account, with no account below it that is not deallocated. Its processes are ended and its home unmounted; its system account is deleted, with the files it left in <RT·code>/tmp</RT·code>, <RT·code>/var/tmp</RT·code> and <RT·code>/dev/shm</RT·code>; its uids are retired; its rows in <RT·code>account_setting</RT·code> and <RT·code>account_share</RT·code> are deleted; and its home is moved to <RT·code>account-deallocated</RT·code>. An account whose parent is not in its storage database, which includes every login account, is not deallocated through the gate.</li>
         <li><RT·code>share_with</RT·code>(account_name, list__account_name) and <RT·code>share_remove</RT·code>(account_name, list__account_name): make or end the shares of account_name with each account of the list. Every account named is the requesting account or below it, all of one storage database, and no member is account_name itself. Described under Share.</li>
@@ -546,7 +588,7 @@
       </ol>
 
       <p>
-        A refusal, for a limit for instance, comes before anything on the system has changed, since the guard reads the records first. Under its lock the interpreter checks again that the parent is active and the name is free, but not the limits; State of the code lists this.
+        A refusal, for a limit for instance, comes before anything on the system has changed, since the guard reads the records first. Under its lock the interpreter checks again that the parent is active, that the name is free, and the limits, with the same function the guard uses, <RT·code>Request·Record.limit__problem</RT·code>, so two requests at one moment cannot both take a tree's last place.
       </p>
 
       <p>
@@ -562,7 +604,7 @@
       <h2>Giving out a uid</h2>
 
       <p>
-        Each database gives out its own uids, and its write lock is what keeps two requests from being given the same one. The choice of the next uid is made inside the write transaction, opened with <RT·code>BEGIN IMMEDIATE</RT·code>, which takes the lock before anything is read; a uid chosen before the transaction opens could be chosen by two requests at once. The code as it stands chooses first and opens the transaction after, in <RT·code>Storage.account__make</RT·code> and in <RT·code>is-same-account</RT·code>. A request that makes a child account runs both under <RT·code>StoragePlug.Lock</RT·code>, a lock file, <RT·code>/run/Account-Tree/lock</RT·code>, that plug, unplug and every request that changes accounts or shares take, so two requests do not choose at once. The administrator's <RT·code>account make</RT·code> and <RT·code>is-same-account</RT·code> do not take it.
+        Each database gives out its own uids, and its write lock is what keeps two requests from being given the same one. The choice of the next uid is made inside the write transaction, opened with <RT·code>BEGIN IMMEDIATE</RT·code>, which takes the lock before anything is read; a uid chosen before the transaction opens could be chosen by two requests at once. The code as it stands chooses first and opens the transaction after, in <RT·code>Storage.account__make</RT·code> and in <RT·code>is-same-account</RT·code>. A request that makes a child account runs both under <RT·code>StoragePlug.Lock</RT·code>, a lock file, <RT·code>/run/Account-Tree/lock</RT·code>, that plug, unplug and every request that changes accounts, shares or sound take, so two requests do not choose at once. The administrator's <RT·code>account make</RT·code> and <RT·code>is-same-account</RT·code> take it too.
       </p>
 
       <p>
@@ -799,7 +841,20 @@
       </RT·code>
 
       <p>
-        The window, <RT·code>Window.py</RT·code>, is drawn with GTK 4, and today only shows. For the window account it has the panels Account, Authority and Control above, and Child account, Allocate and Allocated below. Child account lists the child accounts with their session state, read again every five seconds, and a button for each opens that account's window, acting with the first window's account. Allocated shows the home. Allocate lists the kinds of resource of <RT·code>ResourceKind.py</RT·code>. Every option that would change something has no action yet and is greyed out, and the Authority panel shows the answer of <RT·code>Authority.py</RT·code>, a stub that refuses every change. The window is to drop <RT·code>Authority.py</RT·code> and call <RT·code>Request·Composer</RT·code>, as the commands do.
+        The window, <RT·code>Window.py</RT·code>, is drawn with GTK 4. Every change it makes is a request, through <RT·code>Request·Composer</RT·code>'s work functions, the ones the commands call, and the guard decides. A window runs under its own account and acts with that account's authority, whether it was opened from a shell of the account or from the window of an account above it: clicking a child account asks the gate, with <RT·code>window_open</RT·code>, to start the child's window under the child. So what a window offers is what its account can do, however many windows are on one desktop, and no window carries another account's authority. What an account does to another is done from above, in the parent's window, on the child's row. It shows the window account in panels: Account, Share and Request in the first row; Child account and Allocate in the second; and Sound across the third.
+      </p>
+
+      <ul>
+        <li><em>Account</em>: the name, the system uid, the place in the tree, and the home.</li>
+        <li><em>Request</em>: what each request did, the interpreter's lines, or, when it was refused, why, with the guard's and the gate's lines.</li>
+        <li><em>Child account</em>: a row for each child account: a button opening its window, its session state, read again every five seconds, <RT·code>enter</RT·code>, which opens a terminal, GNOME Console (<RT·code>kgx</RT·code>) when the system has it, else <RT·code>gnome-terminal</RT·code> or <RT·code>xterm</RT·code>, running <RT·code>Account-Tree enter</RT·code>, held open on the error when entering fails, and <RT·code>deallocate</RT·code>, which asks for the child's full name to be typed. Below the rows, making a child account, by its short name. The list is read again when an account is made or deallocated elsewhere.</li>
+        <li><em>Share</em>: the accounts the window account is shared with, from <RT·code>Share.list__member</RT·code>, each with a button ending the share, and an entry for sharing with another, its name relative to the window account or absolute.</li>
+        <li><em>Allocate</em>: a button for each group of the kinds of resource of <RT·code>ResourceKind.py</RT·code>, opening a window of the kinds in the group. A kind with an action, the name of the window's method that does it, is offered: a child account, and sound, which shows the Sound panel. The others are greyed out.</li>
+        <li><em>Sound</em>: see Window in <RT·code>design_audio.html</RT·code>.</li>
+      </ul>
+
+      <p>
+        A refused connection table stays in the panel as typed, to be corrected. <RT·code>Account-Tree window</RT·code> draws the window itself for the current account, asks <RT·code>window_open</RT·code> for an account below it, and refuses an account above it.
       </p>
 
       <p>
@@ -835,18 +890,12 @@
       <h2>Defect</h2>
 
       <ul>
-        <li><RT·code>storage delete</RT·code> refuses a storage that holds <RT·code>account-deallocated</RT·code>, reporting it as not Account-Tree's (<RT·code>Storage.storage__delete</RT·code>). It is to accept the directory and delete it only with <RT·code>delete-account-data</RT·code>.</li>
-        <li>The limits are counted only by the guard. Two <RT·code>make_child_account</RT·code> requests at the same moment can both pass the count and leave a tree one over its limit; the interpreter is to count again under <RT·code>StoragePlug.Lock</RT·code>.</li>
-        <li>The administrator's <RT·code>account make</RT·code> and <RT·code>is-same-account</RT·code> choose a uid before opening the transaction, and do not take <RT·code>StoragePlug.Lock</RT·code>, so one run beside a request can choose the uid the request chose. Taking the lock closes this; the choice is later to move inside the transaction.</li>
+        <li>None known. The choice of a uid is still made before the transaction opens, in <RT·code>Storage.account__make</RT·code> and <RT·code>is-same-account</RT·code>; every caller now holds <RT·code>StoragePlug.Lock</RT·code>, and the choice is later to move inside the transaction.</li>
       </ul>
 
       <h2>Pending change</h2>
 
       <ul>
-        <li>The window moves off <RT·code>Authority.py</RT·code> onto <RT·code>Request·Composer</RT·code>'s work functions, and <RT·code>Authority.py</RT·code> is removed.</li>
-        <li><RT·code>ChildAccount.child__make</RT·code> still takes <RT·code>list__group</RT·code>, from the group feature that shares replaced; the parameter goes.</li>
-        <li>Listings become access functions: <RT·code>share list</RT·code> and <RT·code>list &lt;account&gt;</RT·code> each get a function that returns the list, and one function prints a list. Logs stay written to the channel.</li>
-        <li>Stale text goes: the <RT·code>storage unplug</RT·code> help says passwords and groups are kept in the system database for the next plug, where the password, aging, comment and shell are now kept on the storage; the <RT·code>Account-Tree_admin</RT·code> help and <RT·code>AccountTree.py</RT·code>'s docstring speak of the Account-Tree server; the window's Control panel names the old <RT·code>subu_login</RT·code> and <RT·code>subu_sound</RT·code> scripts and offers deprecate; <RT·code>ResourceKind.py</RT·code> lists a view.</li>
         <li><RT·code>AccountTree.READ_OLD_SEPARATOR</RT·code>, which splits a name on its last <RT·code>_</RT·code> for accounts that still carry the old separator, is removed once none do.</li>
         <li>The handling of the state <RT·code>deprecated</RT·code> stays only as rows from an earlier version need it: attach does not mount such an account, and deallocation and the guard accept it.</li>
       </ul>
@@ -854,8 +903,10 @@
       <h2>Not yet built</h2>
 
       <ul>
-        <li>The window's Sound panel, and the sound router's first run on IdealX; see State of the code in <RT·code>design_audio.html</RT·code>.</li>
+        <li>What is left to verify of sound on IdealX; see To verify in <RT·code>design_audio.html</RT·code>.</li>
+        <li>A first run of <RT·code>window_open</RT·code> under systemd, on IdealX: in the test system a stand-in for <RT·code>systemd-run</RT·code> started the window, so a session with <RT·code>PAMName=login</RT·code> and no terminal is yet to be seen.</li>
         <li>Transfer, and opening a child account's file from the window.</li>
+        <li>End sessions and rename on a child's row in the window, and the kinds of resource other than a child account and sound.</li>
         <li><RT·code>rename</RT·code>.</li>
         <li>The database account, the record gate, the answer check and the administrator's gate; until then the request interpreter and <RT·code>Account-Tree_admin</RT·code> open the databases under root.</li>
         <li><RT·code>reconcile</RT·code>, and the unit that attaches storage at boot.</li>
@@ -868,7 +919,6 @@
       <h1>Open question</h1>
 
       <ul>
-        <li>Words for the login account and the current account in account names. <RT·code>.</RT·code> for the current account and <RT·code>..</RT·code> for its parent would read as they do in paths, and make those two short names reserved, where the middle dot alone now names root. For the login account, bash expands a bare <RT·code>~</RT·code> to a home directory before the program sees it, so <RT·code>~</RT·code> would have to be quoted, and another mark such as <RT·code>^</RT·code> avoids that.</li>
         <li>A per-account view of the system: software installed for one account and seen by it alone, through a mount namespace or an overlay of <RT·code>/usr</RT·code>, so that installing needs no administrator.</li>
         <li>Whether shares are ever to be made between accounts of different storage databases, and where such a share would be recorded.</li>
         <li>When the request gate moves from setuid root to only the capabilities its requests need: <RT·code>CAP_SYS_ADMIN</RT·code> to mount, <RT·code>CAP_SETUID</RT·code> and <RT·code>CAP_SETGID</RT·code> for sessions, and the file capabilities for accounts and homes.</li>
@@ -896,12 +946,6 @@
       </p>
 
       <h1>Standard 6.0</h1>
-
-      <h2>Longer account name</h2>
-
-      <p>
-        Account names built from a chain of parent names grow long, and 32 bytes, with two for each middle dot, is soon reached. 6.0 is to allow names of 128 bytes. The limit is in user space: the login records and <RT·code>useradd</RT·code>. Distributions are replacing the <RT·code>utmp</RT·code> records with <RT·code>wtmpdb</RT·code> and <RT·code>lastlog2</RT·code>, which have no fixed name field; openSUSE has done so. What remains is the check in <RT·code>useradd</RT·code>, which goes away when Account-Tree edits the account files itself. Whether a system already accepts longer names is found by making a test account with a name past 32 bytes.
-      </p>
 
       <h2>Key</h2>
 

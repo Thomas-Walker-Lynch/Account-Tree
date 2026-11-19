@@ -17,6 +17,13 @@ who asked and what the account tree allows. A journal holds one request.
                        session holds the terminal's master side, a
                        descriptor, which the asking program relays its own
                        terminal to.
+  window_open(account_name ,display)
+                       start the resource window of account_name, a child
+                       account below the account that asked, running under
+                       account_name, on the asking account's display, which
+                       is given to account_name as enter gives it. The window
+                       acts with account_name's authority, as one opened from
+                       a shell under it does.
   make_child_account(account_name ,>made)
                        make the account account_name, whose parent, the name
                        before its last '·', is the account that asked or an
@@ -94,6 +101,7 @@ DEFINITION = {
   ]
   ,"list__format": [
     ["format__enter" ,["in" ,"account_name"] ,["in" ,"display"] ,["in" ,"terminal_type"] ,["out" ,"session"]]
+    ,["format__window_open" ,["in" ,"account_name"] ,["in" ,"display"]]
     ,["format__make_child_account" ,["in" ,"account_name"] ,["out" ,"made"]]
     ,["format__account" ,["in" ,"account_name"]]
     ,["format__share" ,["in" ,"account_name"] ,["in" ,"list__account_name"]]
@@ -107,6 +115,7 @@ DEFINITION = {
   ,"list__result": ["session" ,"made" ,"sound" ,"route"]
   ,"map__instruction": {
     "enter": "format__enter"
+    ,"window_open": "format__window_open"
     ,"make_child_account": "format__make_child_account"
     ,"deallocate": "format__account"
     ,"share_with": "format__share"

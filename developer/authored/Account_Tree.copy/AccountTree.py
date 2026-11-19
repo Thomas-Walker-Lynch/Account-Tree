@@ -5,13 +5,12 @@ AccountTree - the system accounts as a tree, read from their names
 root is at the top of the tree, and a login account is a child of root. Every
 account is entered through its parent: root enters a login account through
 the system's login programs, and a login account enters its child accounts,
-and they theirs, through the Account-Tree server. An account's name is its parent's name,
+and they theirs, through the request gate. An account's name is its parent's name,
 the separator, and its own short name: Thomas·developer·scratch is a child of
 Thomas·developer, a child of the login account Thomas, a child of root.
 
-Until the window reads the system database through the server, the tree is
-read from the system accounts' names. Everything here only reads /etc/passwd,
-so it runs with the privileges of whoever started the tool.
+The tree is read from the system accounts' names. Everything here only reads
+/etc/passwd, so it runs with the privileges of whoever started the tool.
 
 The separator is the middle dot, U+00B7, two bytes in UTF-8. While existing
 system accounts still carry the old separator '_', READ_OLD_SEPARATOR lets a
@@ -97,6 +96,9 @@ def child_account__name(parent: str ,short: str) -> str:
     return short
   return parent + SEPARATOR + short
 
+CURRENT = "."    # as a part of a name typed: the account reached so far, at first the current account
+PARENT = ".."    # as a part of a name typed: the parent of the account reached so far
+
 def account_name__expand(name__current: str ,text: str ,is__existing: bool = True) -> str:
   """
   The system account name of the account text names, read from the current
@@ -107,13 +109,22 @@ def account_name__expand(name__current: str ,text: str ,is__existing: bool = Tru
     ·<name>           absolute: <name> below root, as ·Thomas·developer
     <name>            relative: <name> below the current account, as
                       developer, from Thomas, for Thomas·developer
+    .                 the current account
+    ..                its parent
+    ..·<name>         <name> below the parent: a sibling, from Thomas·developer
+                      ..·browser is Thomas·browser
+
+  The parts of a name are read in turn, as the parts of a path are: . stays
+  where it is and .. goes up one. No account is named . or .., so a part
+  that is one of them always has this meaning; valid_name refuses them as
+  parts of a name, and systemd refuses them as names.
 
   A leading separator marks the name absolute, and no account name begins
   with one, as no part of a name is empty; so a text has one reading,
   whatever the current account is. Root's children carry no prefix in
-  /etc/passwd, so ·Thomas is Thomas, and from root a relative name is the
-  name itself. A trailing separator, which would name the accounts below an
-  account rather than the account, is refused, as no command takes that yet.
+  /etc/passwd, so ·Thomas is Thomas. A trailing separator, which would name
+  the accounts below an account rather than the account, is refused, as no
+  command takes that yet.
 
   Raises ValueError when text is not an account name, and, with
   is__existing, when no system account has the name.
@@ -130,9 +141,19 @@ def account_name__expand(name__current: str ,text: str ,is__existing: bool = Tru
     if rest.startswith(SEPARATOR) or SEPARATOR + SEPARATOR in rest:
       raise ValueError(f"every part of an account name between the separators '{SEPARATOR}' is not empty: {text}")
     if is__absolute or name__current == "root":
-      name = rest
+      list__part = []
     else:
-      name = name__current + SEPARATOR + rest
+      list__part = name__current.split(SEPARATOR)
+    for part in rest.split(SEPARATOR):
+      if part == CURRENT:
+        continue
+      if part == PARENT:
+        if not list__part:
+          raise ValueError(f"{text} goes above root")
+        list__part.pop()
+        continue
+      list__part.append(part)
+    name = SEPARATOR.join(list__part) if list__part else "root"
   if is__existing and sa.system_account(name) is None:
     raise ValueError(f"there is no account {name}" + ("" if name == text else f", which {text} names"))
   return name

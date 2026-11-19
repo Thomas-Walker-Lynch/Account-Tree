@@ -21,6 +21,9 @@ own groups of a storage's accounts; see SameAccount.same_account__replug.
                    accounts, as group memberships made before the table was,
                    so that they are kept
 
+  list__member     the accounts an account is shared with on this system,
+                   read from the group file, which needs no privilege
+
 Each is run under root, by Account-Tree_admin or by the request interpreter,
 which checks the request against the records first, and takes the lock plug
 and unplug take. A work function reports through log; it returns False when
@@ -35,6 +38,11 @@ from Common import act
 from System import open_system_database
 import ChildAccount
 
+
+def list__member(name__share):
+  "the accounts the account name__share is shared with on this system, in name order"
+  group = sa.system_group(name__share)
+  return sorted(group.gr_mem) if group else []
 
 def is__member(name__member ,name__share):
   "whether the system account name__member is a supplementary member of the group name__share"
